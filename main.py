@@ -7,12 +7,13 @@ from dotenv import load_dotenv
 import asyncio
 import logging
 from config import GUILD_ID
+from cogs.vendas import SetupView # <-- NOVO: Importa a View para torná-la permanente
 
 # Carrega o token do arquivo .env ou das variáveis de ambiente da Railway
 load_dotenv()
 TOKEN = os.getenv('DISCORD_BOT_TOKEN')
 
-# Configura o logging para ver o que está acontecendo no painel da Railway
+# Configura o logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s:%(levelname)s:%(name)s: %(message)s')
 
 # Define as intenções (permissões) que o bot precisa
@@ -26,8 +27,14 @@ class IsrabuyBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents)
         self.persistent_views_added = False
 
-    # O setup_hook é executado antes do bot se conectar
     async def setup_hook(self):
+        # Adiciona a view persistente ANTES de conectar
+        # Isso garante que os botões funcionem mesmo após reinicializações
+        if not self.persistent_views_added:
+            self.add_view(SetupView())
+            self.persistent_views_added = True
+            logging.info("View persistente do painel de vendas registrada.")
+
         # Carrega os cogs (módulos) da pasta /cogs
         logging.info("Carregando cogs...")
         for filename in os.listdir('./cogs'):
@@ -38,7 +45,7 @@ class IsrabuyBot(commands.Bot):
                 except Exception as e:
                     logging.error(f"Falha ao carregar o cog '{filename[:-3]}'. Erro: {e}")
         
-        # Sincroniza os comandos com o Discord (Método Rápido para Guild Específica)
+        # Sincroniza os comandos com o Discord
         logging.info(f"Sincronizando comandos para o servidor ID: {GUILD_ID}...")
         try:
             guild = discord.Object(id=GUILD_ID)
@@ -48,27 +55,22 @@ class IsrabuyBot(commands.Bot):
         except Exception as e:
             logging.error(f"Falha ao sincronizar comandos para o servidor: {e}")
 
-    # on_ready é executado quando o bot está online e pronto
     async def on_ready(self):
         logging.info(f'Bot conectado como {self.user} (ID: {self.user.id})')
         logging.info('O bot está pronto e operacional.')
         await self.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="Vendas 24/7 | Israbuy"))
 
-# Função principal para iniciar o bot
 async def main():
     if not TOKEN:
-        logging.critical("TOKEN do Bot não encontrado! Verifique as variáveis de ambiente na Railway.")
+        logging.critical("TOKEN do Bot não encontrado!")
         return
-
     bot = IsrabuyBot()
-    
     try:
         await bot.start(TOKEN)
     except discord.errors.LoginFailure:
-        logging.critical("FALHA NO LOGIN. O token fornecido é inválido. Verifique a variável de ambiente na Railway.")
+        logging.critical("FALHA NO LOGIN. O token fornecido é inválido.")
     except Exception as e:
         logging.critical(f"Erro inesperado ao iniciar o bot: {e}")
 
-# Inicia o bot
 if __name__ == "__main__":
     asyncio.run(main())
