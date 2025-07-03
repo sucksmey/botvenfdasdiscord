@@ -1,7 +1,6 @@
-# main.py
+# main.py - VERSÃO FINAL CORRIGIDA
 
 import discord
-from config import GUILD_ID
 from discord.ext import commands
 import os
 from dotenv import load_dotenv
@@ -39,9 +38,8 @@ class IsrabuyBot(commands.Bot):
                 except Exception as e:
                     logging.error(f"Falha ao carregar o cog '{filename[:-3]}'. Erro: {e}")
         
-        # --- BLOCO MODIFICADO PARA SINCRONIZAÇÃO RÁPIDA ---
         # Sincroniza os comandos com o Discord (Método Rápido para Guild Específica)
-        logging.info(f"Sincronizando comandos para o servidor ID: {GUID_ID}...")
+        logging.info(f"Sincronizando comandos para o servidor ID: {GUILD_ID}...")
         try:
             # Define para qual servidor os comandos devem ser enviados
             guild = discord.Object(id=GUILD_ID)
@@ -55,7 +53,6 @@ class IsrabuyBot(commands.Bot):
             logging.info(f"Sincronizados {len(synced)} comandos para o servidor.")
         except Exception as e:
             logging.error(f"Falha ao sincronizar comandos para o servidor: {e}")
-        # --- FIM DO BLOCO MODIFICADO ---
 
     # on_ready é executado quando o bot está online e pronto
     async def on_ready(self):
