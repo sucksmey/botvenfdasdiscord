@@ -41,15 +41,9 @@ class IsrabuyBot(commands.Bot):
         # Sincroniza os comandos com o Discord (Método Rápido para Guild Específica)
         logging.info(f"Sincronizando comandos para o servidor ID: {GUILD_ID}...")
         try:
-            # Define para qual servidor os comandos devem ser enviados
             guild = discord.Object(id=GUILD_ID)
-            
-            # Copia os comandos globais para o servidor específico
             self.tree.copy_global_to(guild=guild)
-            
-            # Sincroniza os comandos para aquele servidor (isso é quase instantâneo)
             synced = await self.tree.sync(guild=guild)
-            
             logging.info(f"Sincronizados {len(synced)} comandos para o servidor.")
         except Exception as e:
             logging.error(f"Falha ao sincronizar comandos para o servidor: {e}")
@@ -58,7 +52,7 @@ class IsrabuyBot(commands.Bot):
     async def on_ready(self):
         logging.info(f'Bot conectado como {self.user} (ID: {self.user.id})')
         logging.info('O bot está pronto e operacional.')
-        await self.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="as melhores ofertas!"))
+        await self.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="Vendas 24/7 | Israbuy"))
 
 # Função principal para iniciar o bot
 async def main():
