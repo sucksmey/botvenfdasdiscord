@@ -37,14 +37,24 @@ class IsrabuyBot(commands.Bot):
                     logging.info(f"Cog '{filename[:-3]}' carregado com sucesso.")
                 except Exception as e:
                     logging.error(f"Falha ao carregar o cog '{filename[:-3]}'. Erro: {e}")
-
-        # Sincroniza os comandos com o Discord
-        logging.info("Sincronizando comandos...")
+        
+        # --- BLOCO MODIFICADO PARA SINCRONIZAÇÃO RÁPIDA ---
+        # Sincroniza os comandos com o Discord (Método Rápido para Guild Específica)
+        logging.info(f"Sincronizando comandos para o servidor ID: {GUID_ID}...")
         try:
-            synced = await self.tree.sync()
-            logging.info(f"Sincronizados {len(synced)} comandos globais.")
+            # Define para qual servidor os comandos devem ser enviados
+            guild = discord.Object(id=GUILD_ID)
+            
+            # Copia os comandos globais para o servidor específico
+            self.tree.copy_global_to(guild=guild)
+            
+            # Sincroniza os comandos para aquele servidor (isso é quase instantâneo)
+            synced = await self.tree.sync(guild=guild)
+            
+            logging.info(f"Sincronizados {len(synced)} comandos para o servidor.")
         except Exception as e:
-            logging.error(f"Falha ao sincronizar comandos: {e}")
+            logging.error(f"Falha ao sincronizar comandos para o servidor: {e}")
+        # --- FIM DO BLOCO MODIFICADO ---
 
     # on_ready é executado quando o bot está online e pronto
     async def on_ready(self):
