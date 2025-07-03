@@ -1,6 +1,7 @@
 # main.py
 
 import discord
+from config import GUILD_ID
 from discord.ext import commands
 import os
 from dotenv import load_dotenv
