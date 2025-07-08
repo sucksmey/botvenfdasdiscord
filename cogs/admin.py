@@ -7,7 +7,7 @@ from datetime import datetime
 import logging
 import asyncio
 from config import *
-import database # <-- Importa nosso arquivo de banco de dados
+import database 
 
 class Admin(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -43,7 +43,6 @@ class Admin(commands.Cog):
             await interaction.followup.send(f"Não foi possível encontrar o membro com ID {client_id}. Ele pode ter saído do servidor.", ephemeral=True)
             return
 
-        # <-- ALTERAÇÃO: Inserir dados no banco de dados
         try:
             async with database.engine.connect() as conn:
                 await conn.execute(
@@ -52,10 +51,10 @@ class Admin(commands.Cog):
                         user_name=membro.name,
                         product_name=ticket_data.get("item_name", "N/A"),
                         price=ticket_data.get("final_price", 0.0),
-                        gamepass_link=ticket_data.get("gamepass_link"), # Novo campo
+                        gamepass_link=ticket_data.get("gamepass_link"),
                         handler_admin_id=interaction.user.id,
-                        delivery_admin_id=ROBUX_DELIVERY_USER_ID, # Fixo, conforme pedido
-                        timestamp=datetime.now(BR_TIMEZONE)
+                        delivery_admin_id=ROBUX_DELIVERY_USER_ID,
+                        timestamp=datetime.utcnow() # <-- CORREÇÃO: Usando UTC para ser compatível com o DB
                     )
                 )
                 await conn.commit()
@@ -65,7 +64,6 @@ class Admin(commands.Cog):
             await interaction.followup.send("⚠️ Ocorreu um erro ao salvar a transação no banco de dados. A compra foi aprovada, mas não registrada.", ephemeral=True)
 
 
-        # O resto da lógica continua igual
         produto = ticket_data.get("item_name", "N/A")
         final_embed = discord.Embed(title="✅ Compra Finalizada!", description=f"Sua compra de **{produto}** foi entregue com sucesso!\n\nObrigado pela preferência, {membro.mention}! Este ticket será fechado em 15 segundos.", color=discord.Color.green())
         final_embed.set_thumbnail(url=IMAGE_URL_FOR_EMBEDS)
