@@ -6,8 +6,113 @@ from discord import app_commands
 import logging
 from config import *
 import database
+from sqlalchemy import update
+from datetime import datetime
 
-# --- Função Helper para buscar histórico ---
+# --- FUNÇÃO HELPER PARA ENVIAR A AVALIAÇÃO FINAL ---
+async def post_review_embed(interaction: discord.Interaction, transaction_id: int):
+    async with database.engine.connect() as conn:
+        query = database.transactions.select().where(database.transactions.c.id == transaction_id)
+        result = await conn.execute(query)
+        transaction = result.first()
+    
+    if not transaction or not transaction.review_rating:
+        return
+
+    review_channel = interaction.client.get_channel(REVIEW_CHANNEL_ID)
+    if not review_channel:
+        logging.error("Canal de avaliação (REVIEW_CHANNEL_ID) não encontrado.")
+        return
+
+    try:
+        user = await interaction.client.fetch_user(transaction.user_id)
+        handler = await interaction.client.fetch_user(transaction.handler_admin_id)
+        delivery = await interaction.client.fetch_user(transaction.delivery_admin_id)
+    except discord.NotFound:
+        logging.error("Não foi possível encontrar um dos usuários para postar a avaliação.")
+        return
+
+    embed = discord.Embed(title="🌟 Nova Avaliação de Cliente!", color=discord.Color.gold(), timestamp=datetime.now(BR_TIMEZONE))
+    embed.set_author(name=user.name, icon_url=user.display_avatar.url)
+    
+    embed.add_field(name="Cliente", value=user.mention, inline=True)
+    embed.add_field(name="Atendente", value=handler.mention, inline=True)
+    embed.add_field(name="Entregador", value=delivery.mention, inline=True)
+    
+    embed.add_field(name="Produto Comprado", value=transaction.product_name, inline=True)
+    embed.add_field(name="Método de Pagamento", value=transaction.payment_method, inline=True)
+    embed.add_field(name="Nota", value=f"**{transaction.review_rating} / 10** ✨", inline=True)
+
+    if transaction.review_text:
+        embed.add_field(name="Comentário do Cliente", value=f"```{transaction.review_text}```", inline=False)
+        
+    await review_channel.send(embed=embed)
+
+
+# --- MODAL PARA ESCREVER A AVALIAÇÃO ---
+class ReviewModal(discord.ui.Modal, title="Deixe seu Feedback"):
+    def __init__(self, transaction_id: int):
+        super().__init__()
+        self.transaction_id = transaction_id
+
+    comment = discord.ui.TextInput(
+        label="Seu comentário (opcional)", style=discord.TextStyle.paragraph,
+        placeholder="Gostei muito do atendimento, foi rápido e...",
+        required=False, max_length=1000
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        review_text = self.comment.value or "Nenhum comentário."
+        
+        async with database.engine.connect() as conn:
+            query = update(database.transactions).where(database.transactions.c.id == self.transaction_id).values(review_text=review_text)
+            await conn.execute(query)
+            await conn.commit()
+            
+        await interaction.response.send_message("Obrigado pelo seu comentário!", ephemeral=True)
+        await post_review_embed(interaction, self.transaction_id)
+
+
+# --- VIEW PARA PEDIR A AVALIAÇÃO ---
+class ReviewView(discord.ui.View):
+    def __init__(self, transaction_id: int):
+        super().__init__(timeout=None)
+        self.transaction_id = transaction_id
+        self.add_item(self.RatingSelect(transaction_id))
+
+    class RatingSelect(discord.ui.Select):
+        def __init__(self, transaction_id: int):
+            self.transaction_id = transaction_id
+            options = [discord.SelectOption(label=f"Nota {i}", value=str(i), emoji="⭐") for i in range(10, 0, -1)]
+            super().__init__(placeholder="Escolha sua nota de 1 a 10...", options=options, custom_id=f"rating_select:{transaction_id}")
+
+        async def callback(self, interaction: discord.Interaction):
+            rating = int(self.values[0])
+            async with database.engine.connect() as conn:
+                query = update(database.transactions).where(database.transactions.c.id == self.transaction_id).values(review_rating=rating)
+                await conn.execute(query)
+                await conn.commit()
+            
+            await interaction.response.send_message(f"Você avaliou com nota {rating}! Obrigado.", ephemeral=True)
+            
+            # Desativa o menu de nota após o uso
+            self.disabled = True
+            await interaction.message.edit(view=self.view)
+
+            # Verifica se já tem um comentário para postar o review completo
+            async with database.engine.connect() as conn:
+                query_check = database.transactions.select().where(database.transactions.c.id == self.transaction_id)
+                transaction = (await conn.execute(query_check)).first()
+                if transaction and transaction.review_text:
+                    await post_review_embed(interaction, self.transaction_id)
+
+    @discord.ui.button(label="Deixar um Comentário", style=discord.ButtonStyle.secondary, custom_id=f"comment_button", emoji="📝")
+    async def comment_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(ReviewModal(transaction_id=self.transaction_id))
+
+
+# --- ÁREA DO CLIENTE E VIP ---
+
 async def show_purchase_history(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     try:
@@ -22,30 +127,20 @@ async def show_purchase_history(interaction: discord.Interaction):
 
         embed = discord.Embed(title=f"📜 Histórico de Compras de {interaction.user.name}", color=ROSE_COLOR)
         embed.set_thumbnail(url=interaction.user.display_avatar.url)
-        
         description_lines = []
         total_spent = 0.0
-        for purchase in user_purchases[:10]: # Limita a 10 compras para não sobrecarregar
-            purchase_date = purchase.timestamp.strftime('%d/%m/%Y às %H:%M')
-            description_lines.append(
-                f"**Produto:** {purchase.product_name}\n"
-                f"**Valor:** R$ {purchase.price:.2f}\n"
-                f"**Data:** {purchase_date} (UTC)\n"
-                f"--------------------"
-            )
+        for purchase in user_purchases[:10]:
+            purchase_date = discord.utils.format_dt(purchase.timestamp, style='f')
+            description_lines.append(f"**Produto:** {purchase.product_name}\n**Valor:** R$ {purchase.price:.2f}\n**Data:** {purchase_date}\n--------------------")
             total_spent += purchase.price
         
         embed.description = "\n".join(description_lines)
         embed.set_footer(text=f"Total gasto: R$ {total_spent:.2f} | Mostrando as últimas {len(user_purchases[:10])} de {len(user_purchases)} compras.")
-
         await interaction.followup.send(embed=embed, ephemeral=True)
-
     except Exception as e:
         logging.error(f"Erro ao buscar histórico de compras para {interaction.user.id}: {e}")
-        await interaction.followup.send("Ocorreu um erro ao tentar buscar seu histórico. Por favor, tente novamente mais tarde.", ephemeral=True)
+        await interaction.followup.send("Ocorreu um erro ao tentar buscar seu histórico.", ephemeral=True)
 
-
-# --- View Persistente para o Painel do Cliente ---
 class CustomerAreaView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -54,8 +149,41 @@ class CustomerAreaView(discord.ui.View):
     async def view_purchases_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await show_purchase_history(interaction)
 
+class VipPurchaseView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
 
-# --- Cog do Cliente ---
+    @discord.ui.button(label="✨ Tornar-se VIP!", style=discord.ButtonStyle.success, custom_id="purchase_vip_button")
+    async def purchase_vip_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        user = interaction.user
+        guild = interaction.guild
+        vip_role = guild.get_role(VIP_ROLE_ID)
+        if vip_role and vip_role in user.roles:
+            await interaction.followup.send("Você já é um membro VIP!", ephemeral=True)
+            return
+
+        category = discord.utils.get(guild.categories, id=CATEGORY_VENDAS_VIP_ID)
+        admin_role = guild.get_role(ADMIN_ROLE_ID)
+        if not category or not admin_role:
+            await interaction.followup.send("Erro de configuração do servidor.", ephemeral=True)
+            return
+
+        channel_name = f"vip-{user.name}"
+        overwrites = { guild.default_role: discord.PermissionOverwrite(read_messages=False), user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True), admin_role: discord.PermissionOverwrite(read_messages=True, send_messages=True)}
+        new_channel = await guild.create_text_channel(name=channel_name, category=category, overwrites=overwrites, topic=f"Ticket VIP de {user.display_name} | ID: {user.id}")
+        
+        ONGOING_SALES_DATA[new_channel.id] = {"client_id": user.id, "product_name": "Assinatura VIP", "status": "awaiting_vip_payment"}
+        await interaction.followup.send(f"Seu ticket para comprar VIP foi criado em {new_channel.mention}!", ephemeral=True)
+        
+        embed = discord.Embed(title="💎 Compra de Assinatura VIP", description=f"Olá {user.mention}! Para se tornar VIP, o valor é de **R$ {VIP_PRICE:.2f}**.", color=ROSE_COLOR)
+        embed.add_field(name="Benefícios", value="- Descontos exclusivos em Robux\n- Acesso a canais especiais\n- Sorteios e muito mais!", inline=False)
+        pix_embed = discord.Embed(title="Pagamento via PIX", description="Use o QR Code acima ou a chave **Copia e Cola** enviada abaixo.", color=ROSE_COLOR).set_footer(text="Após pagar, por favor, envie o comprovante neste chat.").set_image(url=QR_CODE_URL)
+        
+        await new_channel.send(content=f"<@&{ADMIN_ROLE_ID}>, um novo pedido de VIP foi iniciado.", embed=embed)
+        await new_channel.send(embed=pix_embed)
+        await new_channel.send(f"`{PIX_KEY_MANUAL}`")
+
 class Cliente(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -69,15 +197,19 @@ class Cliente(commands.Cog):
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.checks.has_role(ADMIN_ROLE_ID)
     async def setup_customer_panel(self, interaction: discord.Interaction):
-        embed = discord.Embed(
-            title="👤 Área do Cliente - Israbuy",
-            description="Bem-vindo(a) à sua área de cliente!\n\nClique no botão abaixo para ver seu histórico de compras de forma privada.",
-            color=ROSE_COLOR
-        )
+        embed = discord.Embed(title="👤 Área do Cliente - Israbuy", description="Bem-vindo(a) à sua área de cliente!\n\nClique no botão abaixo para ver seu histórico de compras de forma privada.", color=ROSE_COLOR)
         embed.set_thumbnail(url=IMAGE_URL_FOR_EMBEDS)
         await interaction.response.send_message("Painel do cliente criado!", ephemeral=True)
         await interaction.channel.send(embed=embed, view=CustomerAreaView())
 
+    @app_commands.command(name="setupvip", description="[Admin] Envia o painel para compra de VIP.")
+    @app_commands.guilds(discord.Object(id=GUILD_ID))
+    @app_commands.checks.has_role(ADMIN_ROLE_ID)
+    async def setup_vip_panel(self, interaction: discord.Interaction):
+        embed = discord.Embed(title="💎 Torne-se um Membro VIP!", description=(f"Tenha acesso a benefícios exclusivos em nossa loja!\n\n**Vantagens:**\n- Descontos em pacotes de Robux\n- Acesso a canais e sorteios exclusivos\n- Atendimento prioritário\n\nClique no botão abaixo para iniciar a compra da sua assinatura por **R$ {VIP_PRICE:.2f}**."), color=discord.Color.gold())
+        embed.set_thumbnail(url=IMAGE_URL_FOR_EMBEDS)
+        await interaction.response.send_message("Painel VIP criado!", ephemeral=True)
+        await interaction.channel.send(embed=embed, view=VipPurchaseView())
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Cliente(bot))
