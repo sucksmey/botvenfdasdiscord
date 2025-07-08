@@ -1,9 +1,9 @@
 # cogs/admin.py
 
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord import app_commands
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 import asyncio
 from config import *
@@ -12,16 +12,77 @@ import database
 class Admin(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self.cleanup_loop.start()
 
-    @app_commands.command(name="atender", description="[Admin] Assume o atendimento de um ticket, pausando a automação.")
+    def cog_unload(self):
+        self.cleanup_loop.cancel()
+
+    @tasks.loop(hours=6)
+    async def cleanup_loop(self):
+        logging.info("Executando tarefa de limpeza de tickets arquivados...")
+        days_to_keep = 4
+        cleanup_threshold = datetime.utcnow() - timedelta(days=days_to_keep)
+        
+        try:
+            async with database.engine.connect() as conn:
+                query = database.transactions.select().where(
+                    database.transactions.c.closed_at <= cleanup_threshold,
+                    database.transactions.c.is_archived == False
+                )
+                old_tickets_to_delete = await conn.execute(query)
+                
+                transcript_channel = self.bot.get_channel(TRANSCRIPT_CHANNEL_ID)
+
+                for ticket in old_tickets_to_delete:
+                    channel_id = ticket.channel_id
+                    if not channel_id:
+                        continue
+                        
+                    channel = self.bot.get_channel(channel_id)
+                    if channel:
+                        try:
+                            await channel.delete(reason="Limpeza automática de ticket antigo.")
+                            logging.info(f"Canal de ticket {channel_id} deletado com sucesso.")
+                            
+                            if transcript_channel:
+                                await transcript_channel.send(f"🗑️ O ticket `entregue-{ticket.user_name}` (ID: {channel_id}) foi deletado automaticamente após {days_to_keep} dias.")
+
+                        except discord.errors.NotFound:
+                            logging.warning(f"Não foi possível deletar o canal {channel_id}, pois ele não foi encontrado.")
+                        except Exception as e:
+                            logging.error(f"Erro ao deletar o canal {channel_id}: {e}")
+                    
+                    update_query = database.transactions.update().where(database.transactions.c.id == ticket.id).values(is_archived=True)
+                    await conn.execute(update_query)
+
+                await conn.commit()
+            logging.info("Tarefa de limpeza finalizada.")
+        except Exception as e:
+            logging.error(f"Erro na tarefa de limpeza (cleanup_loop): {e}")
+
+    @cleanup_loop.before_loop
+    async def before_cleanup(self):
+        await self.bot.wait_until_ready()
+
+    @app_commands.command(name="atender", description="[Admin] Libera o chat para o admin e renomeia o canal.")
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.checks.has_role(ADMIN_ROLE_ID)
     async def atender(self, interaction: discord.Interaction):
-        if interaction.channel.id in ONGOING_SALES_DATA:
-            ONGOING_SALES_DATA[interaction.channel.id]['status'] = 'being_attended_by_human'
-            await interaction.response.send_message(f"Olá! {interaction.user.mention} está assumindo o seu atendimento a partir de agora.")
-        else:
-            await interaction.response.send_message("Este não parece ser um ticket de venda ativo.", ephemeral=True)
+        channel = interaction.channel
+        admin_user = interaction.user
+        
+        if channel.id not in ONGOING_SALES_DATA:
+            await interaction.response.send_message("Este comando só pode ser usado em um ticket de venda ativo.", ephemeral=True)
+            return
+            
+        try:
+            await channel.set_permissions(admin_user, send_messages=True)
+            await channel.edit(name=f"atendido-{admin_user.name.split('#')[0]}")
+            await interaction.response.send_message(f"Olá! {admin_user.mention} está assumindo o seu atendimento a partir de agora.", allowed_mentions=discord.AllowedMentions(users=True))
+            ONGOING_SALES_DATA[channel.id]['handler_admin_id'] = admin_user.id
+        except Exception as e:
+            logging.error(f"Falha ao atender o ticket {channel.id}: {e}")
+            await interaction.response.send_message("Ocorreu um erro ao tentar atender este ticket.", ephemeral=True)
 
     @app_commands.command(name="aprovar", description="[Admin] Aprova a compra e move o ticket para a categoria de entregues.")
     @app_commands.guilds(discord.Object(id=GUILD_ID))
@@ -43,21 +104,17 @@ class Admin(commands.Cog):
             await interaction.followup.send(f"Não foi possível encontrar o membro com ID {client_id}. Ele pode ter saído do servidor.", ephemeral=True)
             return
 
-        # Salva a transação no banco de dados
         try:
             async with database.engine.connect() as conn:
                 await conn.execute(
                     database.transactions.insert().values(
-                        user_id=membro.id,
-                        user_name=membro.name,
-                        channel_id=channel.id,
+                        user_id=membro.id, user_name=membro.name, channel_id=channel.id,
                         product_name=ticket_data.get("item_name", "N/A"),
                         price=ticket_data.get("final_price", 0.0),
                         gamepass_link=ticket_data.get("gamepass_link"),
                         handler_admin_id=interaction.user.id,
                         delivery_admin_id=ROBUX_DELIVERY_USER_ID,
-                        timestamp=datetime.utcnow(),
-                        closed_at=datetime.utcnow()
+                        timestamp=datetime.utcnow(), closed_at=datetime.utcnow()
                     )
                 )
                 await conn.commit()
@@ -66,7 +123,6 @@ class Admin(commands.Cog):
             logging.error(f"Falha ao salvar a transação no banco de dados: {e}")
             await interaction.followup.send("⚠️ Ocorreu um erro ao salvar a transação no banco de dados. A compra foi aprovada, mas não registrada.", ephemeral=True)
 
-        # Envia o log da compra
         produto = ticket_data.get("item_name", "N/A")
         log_channel = self.bot.get_channel(LOGS_COMPRAS_CHANNEL_ID)
         if log_channel:
@@ -81,12 +137,10 @@ class Admin(commands.Cog):
             log_embed.set_thumbnail(url=membro.display_avatar.url)
             await log_channel.send(embed=log_embed)
 
-        # Envia a mensagem final no ticket
         final_embed = discord.Embed(title="✅ Compra Finalizada!", description=f"Sua compra de **{produto}** foi entregue com sucesso! Este ticket foi arquivado para seu histórico.", color=discord.Color.green())
         final_embed.set_thumbnail(url=IMAGE_URL_FOR_EMBEDS)
         await interaction.followup.send(embed=final_embed)
         
-        # Lógica para mover e arquivar o canal
         entregues_category = interaction.guild.get_channel(CATEGORY_ENTREGUES_ID)
         if entregues_category:
             try:
