@@ -43,7 +43,7 @@ async def post_review_embed(interaction: discord.Interaction, transaction_id: in
     embed.add_field(name="Método de Pagamento", value=transaction.payment_method, inline=True)
     embed.add_field(name="Nota", value=f"**{transaction.review_rating} / 10** ✨", inline=True)
 
-    if transaction.review_text:
+    if transaction.review_text and transaction.review_text != "Nenhum comentário.":
         embed.add_field(name="Comentário do Cliente", value=f"```{transaction.review_text}```", inline=False)
         
     await review_channel.send(embed=embed)
@@ -56,9 +56,11 @@ class ReviewModal(discord.ui.Modal, title="Deixe seu Feedback"):
         self.transaction_id = transaction_id
 
     comment = discord.ui.TextInput(
-        label="Seu comentário (opcional)", style=discord.TextStyle.paragraph,
+        label="Seu comentário (opcional)",
+        style=discord.TextStyle.paragraph,
         placeholder="Gostei muito do atendimento, foi rápido e...",
-        required=False, max_length=1000
+        required=False,
+        max_length=1000,
     )
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -84,7 +86,7 @@ class ReviewView(discord.ui.View):
         def __init__(self, transaction_id: int):
             self.transaction_id = transaction_id
             options = [discord.SelectOption(label=f"Nota {i}", value=str(i), emoji="⭐") for i in range(10, 0, -1)]
-            super().__init__(placeholder="Escolha sua nota de 1 a 10...", options=options, custom_id=f"rating_select:{transaction_id}")
+            super().__init__(placeholder="Escolha sua nota de 1 a 10...", min_values=1, max_values=1, custom_id=f"rating_select:{transaction_id}")
 
         async def callback(self, interaction: discord.Interaction):
             rating = int(self.values[0])
@@ -93,16 +95,15 @@ class ReviewView(discord.ui.View):
                 await conn.execute(query)
                 await conn.commit()
             
-            await interaction.response.send_message(f"Você avaliou com nota {rating}! Obrigado.", ephemeral=True)
+            await interaction.response.send_message(f"Você avaliou com nota {rating}! Obrigado. Se quiser, pode deixar um comentário.", ephemeral=True)
             
-            # Desativa o menu de nota após o uso
             self.disabled = True
             await interaction.message.edit(view=self.view)
 
-            # Verifica se já tem um comentário para postar o review completo
             async with database.engine.connect() as conn:
                 query_check = database.transactions.select().where(database.transactions.c.id == self.transaction_id)
-                transaction = (await conn.execute(query_check)).first()
+                result = await conn.execute(query_check)
+                transaction = result.first()
                 if transaction and transaction.review_text:
                     await post_review_embed(interaction, self.transaction_id)
 
@@ -131,7 +132,7 @@ async def show_purchase_history(interaction: discord.Interaction):
         total_spent = 0.0
         for purchase in user_purchases[:10]:
             purchase_date = discord.utils.format_dt(purchase.timestamp, style='f')
-            description_lines.append(f"**Produto:** {purchase.product_name}\n**Valor:** R$ {purchase.price:.2f}\n**Data:** {purchase_date}\n--------------------")
+            description_lines.append(f"**Produto:** {purchase.product_name}\n**Valor:** R$ {purchase.price:.2f}\n**Data:** {purchase_date} (UTC)\n--------------------")
             total_spent += purchase.price
         
         embed.description = "\n".join(description_lines)
@@ -139,7 +140,7 @@ async def show_purchase_history(interaction: discord.Interaction):
         await interaction.followup.send(embed=embed, ephemeral=True)
     except Exception as e:
         logging.error(f"Erro ao buscar histórico de compras para {interaction.user.id}: {e}")
-        await interaction.followup.send("Ocorreu um erro ao tentar buscar seu histórico.", ephemeral=True)
+        await interaction.followup.send("Ocorreu um erro ao tentar buscar seu histórico. Por favor, tente novamente mais tarde.", ephemeral=True)
 
 class CustomerAreaView(discord.ui.View):
     def __init__(self):
@@ -173,7 +174,7 @@ class VipPurchaseView(discord.ui.View):
         overwrites = { guild.default_role: discord.PermissionOverwrite(read_messages=False), user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True), admin_role: discord.PermissionOverwrite(read_messages=True, send_messages=True)}
         new_channel = await guild.create_text_channel(name=channel_name, category=category, overwrites=overwrites, topic=f"Ticket VIP de {user.display_name} | ID: {user.id}")
         
-        ONGOING_SALES_DATA[new_channel.id] = {"client_id": user.id, "product_name": "Assinatura VIP", "status": "awaiting_vip_payment"}
+        ONGOING_SALES_DATA[new_channel.id] = {"client_id": user.id, "product_name": "Assinatura VIP", "status": "awaiting_vip_payment", "final_price": VIP_PRICE}
         await interaction.followup.send(f"Seu ticket para comprar VIP foi criado em {new_channel.mention}!", ephemeral=True)
         
         embed = discord.Embed(title="💎 Compra de Assinatura VIP", description=f"Olá {user.mention}! Para se tornar VIP, o valor é de **R$ {VIP_PRICE:.2f}**.", color=ROSE_COLOR)
