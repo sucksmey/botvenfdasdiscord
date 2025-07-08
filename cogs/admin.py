@@ -71,18 +71,51 @@ class Admin(commands.Cog):
         channel = interaction.channel
         admin_user = interaction.user
         
-        if channel.id not in ONGOING_SALES_DATA:
-            await interaction.response.send_message("Este comando só pode ser usado em um ticket de venda ativo.", ephemeral=True)
+        # Função interna para executar a lógica de atendimento
+        async def perform_attend_logic(is_memory_ticket=True):
+            try:
+                await channel.set_permissions(admin_user, send_messages=True)
+                await channel.edit(name=f"atendido-{admin_user.name.split('#')[0]}")
+
+                if is_memory_ticket:
+                    # Se o ticket está na memória, a interação original é usada
+                    await interaction.response.send_message(f"Olá! {admin_user.mention} está assumindo o seu atendimento a partir de agora.", allowed_mentions=discord.AllowedMentions(users=True))
+                else:
+                    # Se foi recuperado, a interação já foi respondida com a msg de recuperação
+                    await interaction.followup.send(f"Olá! {admin_user.mention} está assumindo o seu atendimento a partir de agora.", allowed_mentions=discord.AllowedMentions(users=True))
+
+                if channel.id in ONGOING_SALES_DATA:
+                    ONGOING_SALES_DATA[channel.id]['handler_admin_id'] = admin_user.id
+            except Exception as e:
+                logging.error(f"Falha ao atender o ticket {channel.id}: {e}")
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("Ocorreu um erro ao tentar atender este ticket.", ephemeral=True)
+                else:
+                    await interaction.followup.send("Ocorreu um erro ao tentar atender este ticket.", ephemeral=True)
+
+        # Se o ticket já está na memória, atende normalmente
+        if channel.id in ONGOING_SALES_DATA:
+            await perform_attend_logic(is_memory_ticket=True)
             return
+
+        # SE NÃO ESTIVER NA MEMÓRIA, TENTA RECUPERAR DO TÓPICO DO CANAL
+        if channel.topic and "ID: " in channel.topic:
+            await interaction.response.send_message("Este ticket não estava na memória (o bot pode ter reiniciado). Re-registrando e atendendo...", ephemeral=True)
             
-        try:
-            await channel.set_permissions(admin_user, send_messages=True)
-            await channel.edit(name=f"atendido-{admin_user.name.split('#')[0]}")
-            await interaction.response.send_message(f"Olá! {admin_user.mention} está assumindo o seu atendimento a partir de agora.", allowed_mentions=discord.AllowedMentions(users=True))
-            ONGOING_SALES_DATA[channel.id]['handler_admin_id'] = admin_user.id
-        except Exception as e:
-            logging.error(f"Falha ao atender o ticket {channel.id}: {e}")
-            await interaction.response.send_message("Ocorreu um erro ao tentar atender este ticket.", ephemeral=True)
+            try:
+                client_id_str = channel.topic.split("ID: ")[1]
+                client_id = int(client_id_str)
+                
+                # Recria a entrada na memória
+                ONGOING_SALES_DATA[channel.id] = {'client_id': client_id, 'status': 're-attended'}
+                await perform_attend_logic(is_memory_ticket=False)
+            except (IndexError, TypeError, ValueError) as e:
+                logging.error(f"Falha ao recuperar ID do cliente do tópico do canal {channel.id}: {e}")
+                await interaction.followup.send("Não consegui recuperar as informações deste ticket pelo tópico do canal.", ephemeral=True)
+            return
+
+        # Se não for um ticket válido de nenhuma forma
+        await interaction.response.send_message("Este comando só pode ser usado em um ticket de venda ativo.", ephemeral=True)
 
     @app_commands.command(name="aprovar", description="[Admin] Aprova a compra e move o ticket para a categoria de entregues.")
     @app_commands.guilds(discord.Object(id=GUILD_ID))
@@ -92,7 +125,7 @@ class Admin(commands.Cog):
         ticket_data = ONGOING_SALES_DATA.get(channel.id)
 
         if not ticket_data:
-            await interaction.response.send_message("Este não parece ser um ticket de venda ativo.", ephemeral=True)
+            await interaction.response.send_message("Este não parece ser um ticket de venda ativo. Se o bot reiniciou, use /atender primeiro.", ephemeral=True)
             return
 
         await interaction.response.defer()
@@ -138,9 +171,19 @@ class Admin(commands.Cog):
             await log_channel.send(embed=log_embed)
 
         final_embed = discord.Embed(title="✅ Compra Finalizada!", description=f"Sua compra de **{produto}** foi entregue com sucesso! Este ticket foi arquivado para seu histórico.", color=discord.Color.green())
-        final_embed.set_thumbnail(url=IMAGE_URL_FOR_EMBEDS)
         await interaction.followup.send(embed=final_embed)
         
+        try:
+            from cogs.cliente import CustomerAreaView
+            dm_embed = discord.Embed(title="❤️ Obrigado pela sua compra!", description=f"Olá {membro.name}! A sua compra de **{produto}** foi concluída com sucesso.\n\nAgradecemos a sua preferência! Clique no botão abaixo para ver seu histórico de compras conosco.", color=ROSE_COLOR)
+            dm_embed.set_thumbnail(url=IMAGE_URL_FOR_EMBEDS)
+            await membro.send(embed=dm_embed, view=CustomerAreaView())
+            logging.info(f"DM de agradecimento enviada para {membro.name} ({membro.id}).")
+        except discord.errors.Forbidden:
+            logging.warning(f"Não foi possível enviar a DM para o usuário {membro.name} ({membro.id}).")
+        except Exception as e:
+            logging.error(f"Erro ao tentar enviar a DM para {membro.name}: {e}")
+
         entregues_category = interaction.guild.get_channel(CATEGORY_ENTREGUES_ID)
         if entregues_category:
             try:
@@ -150,7 +193,7 @@ class Admin(commands.Cog):
                 logging.error(f"Falha ao mover/arquivar o canal {channel.id}: {e}")
                 await interaction.channel.send("⚠️ Não consegui mover este canal para a categoria de entregues.")
         else:
-            await interaction.channel.send(f"⚠️ Categoria de 'pedidos entregues' (ID: {CATEGORY_ENTREGUES_ID}) não encontrada. O canal não foi movido.")
+            await interaction.channel.send(f"⚠️ Categoria de 'pedidos entregues' (ID: {CATEGORY_ENTREGUES_ID}) não encontrada.")
 
         if channel.id in ONGOING_SALES_DATA:
             del ONGOING_SALES_DATA[channel.id]
@@ -160,7 +203,7 @@ class Admin(commands.Cog):
     @app_commands.checks.has_role(ADMIN_ROLE_ID)
     async def fechar(self, interaction: discord.Interaction):
         channel = interaction.channel
-        if "ticket-" not in channel.name and "entregar-" not in channel.name:
+        if "ticket-" not in channel.name and "entregar-" not in channel.name and "atendido-" not in channel.name:
             await interaction.response.send_message("Este comando só pode ser usado em um canal de ticket.", ephemeral=True)
             return
         
