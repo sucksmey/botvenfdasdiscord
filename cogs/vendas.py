@@ -10,8 +10,6 @@ from datetime import datetime
 from config import *
 
 # --- VIEWS PERSISTENTES ---
-# A view do painel de vendas precisa ser definida fora da classe do Cog para ser importada no main.py
-
 class ProductSelect(discord.ui.Select):
     def __init__(self):
         options = [discord.SelectOption(label=name, emoji=data["emoji"]) for name, data in PRODUCTS_DATA.items()]
@@ -88,8 +86,6 @@ class SetupView(discord.ui.View):
         embed.set_footer(text="Para comprar, selecione uma opção no menu acima.")
         await button_interaction.response.send_message(embed=embed, ephemeral=True)
 
-# --- OUTRAS VIEWS E FUNÇÕES ---
-
 class GamepassConfirmationView(discord.ui.View):
     def __init__(self, robux_amount: int):
         super().__init__(timeout=300)
@@ -139,7 +135,6 @@ def calculate_robux_price(amount: int) -> float:
 
     thousands = amount // 1000
     remainder = amount % 1000
-    
     price = thousands * PRODUCTS_DATA["Robux"]["prices"]["1000 Robux"]
     
     if remainder > 0:
@@ -148,29 +143,11 @@ def calculate_robux_price(amount: int) -> float:
             price += PRODUCTS_DATA["Robux"]["prices"][f"{closest_hundred} Robux"]
         else:
             price += remainder * ROBUX_PRICE_PER_UNIT
-
     return round(price, 2)
-
-
-# --- CLASSE DO COG ---
 
 class Vendas(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-
-    @app_commands.command(name="setupvendas", description="Envia o painel de vendas permanente no canal.")
-    @app_commands.guilds(discord.Object(id=GUILD_ID))
-    @app_commands.checks.has_role(ADMIN_ROLE_ID)
-    async def setupvendas(self, interaction: discord.Interaction):
-        embed = discord.Embed(
-            title="✨ Bem-vindo(a) à Loja Israbuy!",
-            description="Pronto para a melhor experiência de compra?\n\nSelecione um jogo ou serviço no menu abaixo para abrir um ticket ou clique no botão para ver todos os preços.",
-            color=ROSE_COLOR
-        )
-        embed.set_thumbnail(url=IMAGE_URL_FOR_EMBEDS)
-        
-        await interaction.response.send_message("Painel de vendas enviado!", ephemeral=True)
-        await interaction.channel.send(embed=embed, view=SetupView())
 
     @app_commands.command(name="calculadora", description="Calcula o valor de uma Game Pass para receber uma quantia de Robux.")
     @app_commands.guilds(discord.Object(id=GUILD_ID))
@@ -227,6 +204,10 @@ class Vendas(commands.Cog):
             delivery_user = self.bot.get_user(ROBUX_DELIVERY_USER_ID)
             mention = delivery_user.mention if delivery_user else f"<@{ROBUX_DELIVERY_USER_ID}>"
             await message.channel.send(f"Link da Game Pass recebido! O responsável pela entrega, {mention}, foi notificado e fará a compra em breve.")
+            
+            # <-- ALTERAÇÃO: Salva o link da gamepass nos dados do ticket
+            ticket_data['gamepass_link'] = message.content
+            
             try:
                 await message.channel.edit(name=f"entregar-{message.author.name}")
                 ticket_data["status"] = "delivery_pending"
@@ -285,6 +266,20 @@ class Vendas(commands.Cog):
             else:
                 await message.channel.send("Não encontrei este item. Por favor, digite o nome ou o valor exatamente como está na tabela (ex: `1000 Robux` ou `1000`).")
             return
+
+    @app_commands.command(name="setupvendas", description="Envia o painel de vendas permanente no canal.")
+    @app_commands.guilds(discord.Object(id=GUILD_ID))
+    @app_commands.checks.has_role(ADMIN_ROLE_ID)
+    async def setupvendas(self, interaction: discord.Interaction):
+        embed = discord.Embed(
+            title="✨ Bem-vindo(a) à Loja Israbuy!",
+            description="Pronto para a melhor experiência de compra?\n\nSelecione um jogo ou serviço no menu abaixo para abrir um ticket ou clique no botão para ver todos os preços.",
+            color=ROSE_COLOR
+        )
+        embed.set_thumbnail(url=IMAGE_URL_FOR_EMBEDS)
+        
+        await interaction.response.send_message("Painel de vendas enviado!", ephemeral=True)
+        await interaction.channel.send(embed=embed, view=SetupView())
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Vendas(bot))
