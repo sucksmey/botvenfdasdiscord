@@ -1,5 +1,6 @@
 # main.py - VERSÃO FINAL CORRIGIDA
 
+import database # <-- ADICIONADO: Importa nosso arquivo de banco de dados
 import discord
 from discord.ext import commands
 import os
@@ -7,7 +8,7 @@ from dotenv import load_dotenv
 import asyncio
 import logging
 from config import GUILD_ID
-from cogs.vendas import SetupView # <-- NOVO: Importa a View para torná-la permanente
+from cogs.vendas import SetupView
 
 # Carrega o token do arquivo .env ou das variáveis de ambiente da Railway
 load_dotenv()
@@ -27,9 +28,12 @@ class IsrabuyBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents)
         self.persistent_views_added = False
 
+    # O setup_hook é executado antes do bot se conectar
     async def setup_hook(self):
+        # ADICIONADO: Inicializa a conexão com o banco de dados e cria as tabelas
+        await database.init_db()
+
         # Adiciona a view persistente ANTES de conectar
-        # Isso garante que os botões funcionem mesmo após reinicializações
         if not self.persistent_views_added:
             self.add_view(SetupView())
             self.persistent_views_added = True
