@@ -8,6 +8,7 @@ import math
 import re
 from datetime import datetime
 from config import *
+import database
 
 # --- FUNÇÃO HELPER PARA PROSSEGUIR COM A VENDA ---
 async def proceed_with_sale(interaction: discord.Interaction, selected_product: str):
@@ -19,12 +20,25 @@ async def proceed_with_sale(interaction: discord.Interaction, selected_product: 
     is_vip = any(role.id == VIP_ROLE_ID for role in user.roles)
 
     if selected_product == "Robux":
-        prices_text = "\n".join([f"**{item}**: R$ {price:.2f}" for item, price in product_info["prices"].items()])
+        price_lines = []
+        for item, price in product_info["prices"].items():
+            final_price = price
+            vip_price = product_info.get("vip_prices", {}).get(item)
+            if is_vip and vip_price:
+                final_price = vip_price
+                price_lines.append(f"**{item}**: R$ {final_price:.2f} (Preço VIP ✨)")
+            else:
+                price_lines.append(f"**{item}**: R$ {final_price:.2f}")
+
+        prices_text = "\n".join(price_lines)
         embed.description = ("Confira nossos pacotes padrão abaixo ou **digite qualquer outro valor que desejar** (ex: `2500`).")
         embed.add_field(name="Pacotes Padrão", value=prices_text, inline=False)
         status = "awaiting_robux_choice"
     elif product_info.get("prices"):
-        price_list = [f"**{item}**: R$ {price:.2f}" for item, price in product_info.get("prices", {}).items()]
+        price_list = []
+        for item, price in product_info.get("prices", {}).items():
+            # A lógica de desconto VIP para outros produtos, se houver, entraria aqui
+            price_list.append(f"**{item}**: R$ {price:.2f}")
         prices_text = "\n".join(price_list)
         embed.description = ("Confira nossos preços abaixo e **digite o nome exato ou o valor numérico do item** que você deseja.")
         embed.add_field(name="Tabela de Preços", value=prices_text, inline=False)
@@ -107,10 +121,10 @@ class ProductSelect(discord.ui.Select):
                     await select_interaction.followup.send(f"Você já possui um ticket aberto em {channel.mention}!", ephemeral=True)
                     return
         
-        is_vip = any(role.id == VIP_ROLE_ID for role in user.roles)
-        category_id = CATEGORY_VENDAS_VIP_ID if is_vip else CATEGORY_VENDAS_ID
-        category = discord.utils.get(guild.categories, id=category_id)
         admin_role = guild.get_role(ADMIN_ROLE_ID)
+        category_id = CATEGORY_VENDAS_VIP_ID if any(role.id == VIP_ROLE_ID for role in user.roles) else CATEGORY_VENDAS_ID
+        category = discord.utils.get(guild.categories, id=category_id)
+
         if not category or not admin_role:
             await select_interaction.followup.send("Erro de configuração do servidor. Contate um administrador.", ephemeral=True)
             return
@@ -140,7 +154,15 @@ class SetupView(discord.ui.View):
         embed = discord.Embed(title="📋 Tabela de Preços Completa - Israbuy", description="Aqui estão os preços de todos os nossos produtos.", color=ROSE_COLOR)
         for product, data in PRODUCTS_DATA.items():
             if data.get("prices"):
-                price_list = [f"**{item}**: R$ {price:.2f}" for item, price in data["prices"].items()]
+                price_list = []
+                # Mostra preços VIP para Robux se o usuário for VIP
+                if product == "Robux" and any(role.id == VIP_ROLE_ID for role in button_interaction.user.roles):
+                    for item, price in data["prices"].items():
+                        vip_price = data.get("vip_prices", {}).get(item, price)
+                        price_list.append(f"**{item}**: R$ {vip_price:.2f}")
+                else:
+                    price_list = [f"**{item}**: R$ {price:.2f}" for item, price in data["prices"].items()]
+                
                 embed.add_field(name=f"{data['emoji']} {product}", value="\n".join(price_list), inline=True)
         
         embed.set_footer(text="Para comprar, selecione uma opção no menu acima.")
@@ -156,15 +178,7 @@ class GamepassConfirmationView(discord.ui.View):
         for item in self.children: item.disabled = True
         await interaction.message.edit(view=self)
         gamepass_value = math.ceil(self.robux_amount / 0.7)
-        embed = discord.Embed(
-            title="💎 Calculadora de Game Pass",
-            description=(
-                f"Para receber **{self.robux_amount} Robux**, você precisa criar uma Game Pass no valor de **{gamepass_value} Robux**.\n\n"
-                "**Importante:** Ao criar, **NÃO** marque a opção de preços regionais.\n\n"
-                "Por favor, envie o link da sua Game Pass aqui no chat."
-            ),
-            color=ROSE_COLOR
-        )
+        embed = discord.Embed(title="💎 Calculadora de Game Pass", description=f"Para receber **{self.robux_amount} Robux**, você precisa criar uma Game Pass no valor de **{gamepass_value} Robux**.\n\n**Importante:** Ao criar, **NÃO** marque a opção de preços regionais.\n\nPor favor, envie o link da sua Game Pass aqui no chat.", color=ROSE_COLOR)
         await interaction.response.send_message(embed=embed)
         if interaction.channel.id in ONGOING_SALES_DATA:
             ONGOING_SALES_DATA[interaction.channel.id]['status'] = 'awaiting_gamepass_link'
@@ -174,33 +188,34 @@ class GamepassConfirmationView(discord.ui.View):
         for item in self.children: item.disabled = True
         await interaction.message.edit(view=self)
         gamepass_value = math.ceil(self.robux_amount / 0.7)
-        embed = discord.Embed(
-            title="📄 Tutorial e Cálculo da Game Pass",
-            description=(
-                f"Sem problemas! Assista a este vídeo para aprender a criar sua Game Pass:\n{TUTORIAL_GAMEPASS_URL}\n\n"
-                f"Após assistir, crie uma Game Pass de **{gamepass_value} Robux** e envie o link dela aqui no chat."
-            ),
-            color=ROSE_COLOR
-        )
+        embed = discord.Embed(title="📄 Tutorial e Cálculo da Game Pass", description=f"Sem problemas! Assista a este vídeo para aprender a criar sua Game Pass:\n{TUTORIAL_GAMEPASS_URL}\n\nApós assistir, crie uma Game Pass de **{gamepass_value} Robux** e envie o link dela aqui no chat.", color=ROSE_COLOR)
         await interaction.response.send_message(embed=embed)
         if interaction.channel.id in ONGOING_SALES_DATA:
             ONGOING_SALES_DATA[interaction.channel.id]['status'] = 'awaiting_gamepass_link'
 
-def calculate_robux_price(amount: int) -> float:
+def calculate_robux_price(amount: int, is_vip: bool = False) -> float:
     if amount <= 0:
         return 0.0
     
-    if f"{amount} Robux" in PRODUCTS_DATA["Robux"]["prices"]:
-        return PRODUCTS_DATA["Robux"]["prices"][f"{amount} Robux"]
+    robux_prices = PRODUCTS_DATA["Robux"]["prices"]
+    robux_vip_prices = PRODUCTS_DATA["Robux"].get("vip_prices", {})
 
+    if is_vip and f"{amount} Robux" in robux_vip_prices:
+        return robux_vip_prices[f"{amount} Robux"]
+    if f"{amount} Robux" in robux_prices:
+        return robux_prices[f"{amount} Robux"]
+
+    base_1k_price = robux_vip_prices.get("1000 Robux", robux_prices["1000 Robux"]) if is_vip else robux_prices["1000 Robux"]
+    
     thousands = amount // 1000
     remainder = amount % 1000
-    price = thousands * PRODUCTS_DATA["Robux"]["prices"]["1000 Robux"]
+    price = thousands * base_1k_price
     
     if remainder > 0:
         closest_hundred = math.ceil(remainder / 100) * 100
-        if f"{closest_hundred} Robux" in PRODUCTS_DATA["Robux"]["prices"]:
-            price += PRODUCTS_DATA["Robux"]["prices"][f"{closest_hundred} Robux"]
+        remainder_price = robux_prices.get(f"{closest_hundred} Robux")
+        if remainder_price:
+            price += remainder_price
         else:
             price += remainder * ROBUX_PRICE_PER_UNIT
     return round(price, 2)
@@ -285,22 +300,37 @@ class Vendas(commands.Cog):
 
         if status == "awaiting_robux_choice":
             user_input = message.content.strip()
-            matched_item_price = PRODUCTS_DATA["Robux"]["prices"].get(f"{user_input} Robux")
-            if not matched_item_price:
-                # Tenta casar só com o número se for um pacote padrão
-                for name, price in PRODUCTS_DATA["Robux"]["prices"].items():
+            is_vip = ticket_data.get("is_vip", False)
+            robux_prices = PRODUCTS_DATA["Robux"]["prices"]
+            robux_vip_prices = PRODUCTS_DATA["Robux"].get("vip_prices", {})
+            price = None
+            item_name = None
+
+            # Tenta casar com o nome completo
+            if is_vip and f"{user_input} Robux" in robux_vip_prices:
+                price = robux_vip_prices[f"{user_input} Robux"]
+                item_name = f"{user_input} Robux"
+            elif f"{user_input} Robux" in robux_prices:
+                price = robux_prices[f"{user_input} Robux"]
+                item_name = f"{user_input} Robux"
+            
+            # Se não, tenta casar só com o número
+            if price is None:
+                for name, p_normal in robux_prices.items():
                     if re.sub(r'[^0-9]', '', name) == user_input:
-                        matched_item_price = price
+                        p_vip = robux_vip_prices.get(name)
+                        price = p_vip if is_vip and p_vip else p_normal
+                        item_name = name
                         break
             
-            if matched_item_price:
-                price = matched_item_price
-                item_name = f"{user_input} Robux"
+            if price:
+                pass # Preço já encontrado
             else:
+                # Se não for um pacote, calcula um valor customizado
                 try:
                     amount = int(re.sub(r'[^0-9]', '', user_input))
                     if amount <= 0: raise ValueError()
-                    price = calculate_robux_price(amount)
+                    price = calculate_robux_price(amount, is_vip)
                     item_name = f"{amount} Robux"
                 except (ValueError, TypeError):
                     await message.channel.send("Não entendi o valor. Por favor, digite um dos pacotes da lista ou um número (ex: `9500`).")
@@ -328,8 +358,7 @@ class Vendas(commands.Cog):
             if matched_item:
                 is_vip = ticket_data.get("is_vip", False)
                 price = product_info["prices"][matched_item]
-                if is_vip and product_info.get("vip_discount", {}).get(matched_item):
-                    price -= product_info["vip_discount"][matched_item]
+                # Lógica de desconto VIP para outros produtos, se houver, entraria aqui
                 ticket_data.update({"status": "awaiting_payment", "final_price": price, "item_name": matched_item})
                 await message.channel.send(f"Ótima escolha! O valor para **{matched_item}** é de **R$ {price:.2f}**.")
                 pix_embed = discord.Embed(title="Pagamento via PIX", description="Use o QR Code acima ou a chave **Copia e Cola** enviada abaixo.", color=ROSE_COLOR).set_footer(text="Após pagar, por favor, envie o comprovante neste chat.").set_image(url=QR_CODE_URL)
