@@ -13,20 +13,7 @@ CLIENT_ROLE_ID = 1380201405691727923
 CATEGORY_VENDAS_ID = 1382399986725163140
 CATEGORY_VENDAS_VIP_ID = 1382399986725163140
 LOGS_COMPRAS_CHANNEL_ID = 1382340441579720846
-CATEGORY_ENTREGUES_ID = 123456789012345678 # <-- NOVO: SUBSTITUA PELO ID DA SUA CATEGORIA
-
-# ... (o resto do arquivo continua igual) ...
-
-# --- IDs e Constantes Principais ---
-GUILD_ID = 897650833888534588
-ADMIN_ROLE_ID = 1379126175317622965
-VIP_ROLE_ID = 1070823913308827678
-CLIENT_ROLE_ID = 1380201405691727923
-
-# --- IDs de Canais e Categorias ---
-CATEGORY_VENDAS_ID = 1382399986725163140
-CATEGORY_VENDAS_VIP_ID = 1382399986725163140
-LOGS_COMPRAS_CHANNEL_ID = 1382340441579720846
+CATEGORY_ENTREGUES_ID = 1392174310453411961 # <-- ID ATUALIZADO
 
 # --- Configurações de Negócio e Aparência ---
 ROBUX_DELIVERY_USER_ID = 314200274933907456
@@ -39,8 +26,6 @@ FOOTER_TEXT = "Israbuy - Atendimento via Ticket"
 ROSE_COLOR = discord.Color.from_rgb(255, 105, 180)
 BR_TIMEZONE = pytz.timezone('America/Sao_Paulo')
 
-# Constante para cálculo de Robux customizado
-# Usamos o preço do pacote de 1000 como base para o cálculo (41.00 / 1000 = 0.041 por Robux)
 ROBUX_PRICE_PER_UNIT = 0.041
 
 # --- Banco de Dados de Produtos e Preços ---
@@ -62,5 +47,4 @@ PRODUCTS_DATA = {
     "Elojob VALORANT": {"emoji": "⬆️", "prices": {}},
 }
 
-# --- Gerenciamento de Estado (Temporário) ---
 ONGOING_SALES_DATA = {}
