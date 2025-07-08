@@ -7,7 +7,7 @@ from datetime import datetime
 import logging
 import asyncio
 from config import *
-import database 
+import database
 
 class Admin(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -23,7 +23,7 @@ class Admin(commands.Cog):
         else:
             await interaction.response.send_message("Este não parece ser um ticket de venda ativo.", ephemeral=True)
 
-    @app_commands.command(name="aprovar", description="[Admin] Aprova a compra, salva no DB, registra o log e finaliza o ticket.")
+    @app_commands.command(name="aprovar", description="[Admin] Aprova a compra e move o ticket para a categoria de entregues.")
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.checks.has_role(ADMIN_ROLE_ID)
     async def aprovar(self, interaction: discord.Interaction):
@@ -43,18 +43,21 @@ class Admin(commands.Cog):
             await interaction.followup.send(f"Não foi possível encontrar o membro com ID {client_id}. Ele pode ter saído do servidor.", ephemeral=True)
             return
 
+        # Salva a transação no banco de dados
         try:
             async with database.engine.connect() as conn:
                 await conn.execute(
                     database.transactions.insert().values(
                         user_id=membro.id,
                         user_name=membro.name,
+                        channel_id=channel.id,
                         product_name=ticket_data.get("item_name", "N/A"),
                         price=ticket_data.get("final_price", 0.0),
                         gamepass_link=ticket_data.get("gamepass_link"),
                         handler_admin_id=interaction.user.id,
                         delivery_admin_id=ROBUX_DELIVERY_USER_ID,
-                        timestamp=datetime.utcnow() # <-- CORREÇÃO: Usando UTC para ser compatível com o DB
+                        timestamp=datetime.utcnow(),
+                        closed_at=datetime.utcnow()
                     )
                 )
                 await conn.commit()
@@ -63,12 +66,8 @@ class Admin(commands.Cog):
             logging.error(f"Falha ao salvar a transação no banco de dados: {e}")
             await interaction.followup.send("⚠️ Ocorreu um erro ao salvar a transação no banco de dados. A compra foi aprovada, mas não registrada.", ephemeral=True)
 
-
+        # Envia o log da compra
         produto = ticket_data.get("item_name", "N/A")
-        final_embed = discord.Embed(title="✅ Compra Finalizada!", description=f"Sua compra de **{produto}** foi entregue com sucesso!\n\nObrigado pela preferência, {membro.mention}! Este ticket será fechado em 15 segundos.", color=discord.Color.green())
-        final_embed.set_thumbnail(url=IMAGE_URL_FOR_EMBEDS)
-        await interaction.followup.send(embed=final_embed)
-
         log_channel = self.bot.get_channel(LOGS_COMPRAS_CHANNEL_ID)
         if log_channel:
             log_embed = discord.Embed(title="✅ Log de Compra", color=discord.Color.green(), timestamp=datetime.now(BR_TIMEZONE))
@@ -82,13 +81,27 @@ class Admin(commands.Cog):
             log_embed.set_thumbnail(url=membro.display_avatar.url)
             await log_channel.send(embed=log_embed)
 
+        # Envia a mensagem final no ticket
+        final_embed = discord.Embed(title="✅ Compra Finalizada!", description=f"Sua compra de **{produto}** foi entregue com sucesso! Este ticket foi arquivado para seu histórico.", color=discord.Color.green())
+        final_embed.set_thumbnail(url=IMAGE_URL_FOR_EMBEDS)
+        await interaction.followup.send(embed=final_embed)
+        
+        # Lógica para mover e arquivar o canal
+        entregues_category = interaction.guild.get_channel(CATEGORY_ENTREGUES_ID)
+        if entregues_category:
+            try:
+                await channel.set_permissions(membro, send_messages=False, read_messages=True)
+                await channel.edit(category=entregues_category, name=f"entregue-{membro.name.split('#')[0]}-{channel.id % 1000}")
+            except Exception as e:
+                logging.error(f"Falha ao mover/arquivar o canal {channel.id}: {e}")
+                await interaction.channel.send("⚠️ Não consegui mover este canal para a categoria de entregues.")
+        else:
+            await interaction.channel.send(f"⚠️ Categoria de 'pedidos entregues' (ID: {CATEGORY_ENTREGUES_ID}) não encontrada. O canal não foi movido.")
+
         if channel.id in ONGOING_SALES_DATA:
             del ONGOING_SALES_DATA[channel.id]
-        
-        await asyncio.sleep(15)
-        await channel.delete(reason="Ticket aprovado e concluído.")
 
-    @app_commands.command(name="fechar", description="[Admin] Fecha um ticket manualmente.")
+    @app_commands.command(name="fechar", description="[Admin] Força o fechamento e exclusão de um ticket.")
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.checks.has_role(ADMIN_ROLE_ID)
     async def fechar(self, interaction: discord.Interaction):
@@ -100,7 +113,7 @@ class Admin(commands.Cog):
         if channel.id in ONGOING_SALES_DATA:
             del ONGOING_SALES_DATA[channel.id]
 
-        await interaction.response.send_message("O canal será deletado em 5 segundos...", ephemeral=True)
+        await interaction.response.send_message("Este canal será **deletado permanentemente** em 5 segundos...", ephemeral=True)
         await asyncio.sleep(5)
         await channel.delete(reason="Fechado manualmente por um admin.")
 
