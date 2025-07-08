@@ -7,6 +7,7 @@ from datetime import datetime
 import logging
 import asyncio
 from config import *
+import database # <-- Importa nosso arquivo de banco de dados
 
 class Admin(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -22,7 +23,7 @@ class Admin(commands.Cog):
         else:
             await interaction.response.send_message("Este não parece ser um ticket de venda ativo.", ephemeral=True)
 
-    @app_commands.command(name="aprovar", description="[Admin] Aprova a compra, registra o log e finaliza o ticket.")
+    @app_commands.command(name="aprovar", description="[Admin] Aprova a compra, salva no DB, registra o log e finaliza o ticket.")
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.checks.has_role(ADMIN_ROLE_ID)
     async def aprovar(self, interaction: discord.Interaction):
@@ -37,13 +38,35 @@ class Admin(commands.Cog):
 
         client_id = ticket_data.get("client_id")
         membro = interaction.guild.get_member(client_id)
-        produto = ticket_data.get("item_name", "N/A")
-        valor = ticket_data.get("final_price", 0.0)
-
+        
         if not membro:
             await interaction.followup.send(f"Não foi possível encontrar o membro com ID {client_id}. Ele pode ter saído do servidor.", ephemeral=True)
             return
 
+        # <-- ALTERAÇÃO: Inserir dados no banco de dados
+        try:
+            async with database.engine.connect() as conn:
+                await conn.execute(
+                    database.transactions.insert().values(
+                        user_id=membro.id,
+                        user_name=membro.name,
+                        product_name=ticket_data.get("item_name", "N/A"),
+                        price=ticket_data.get("final_price", 0.0),
+                        gamepass_link=ticket_data.get("gamepass_link"), # Novo campo
+                        handler_admin_id=interaction.user.id,
+                        delivery_admin_id=ROBUX_DELIVERY_USER_ID, # Fixo, conforme pedido
+                        timestamp=datetime.now(BR_TIMEZONE)
+                    )
+                )
+                await conn.commit()
+            logging.info(f"Transação para o ticket {channel.id} salva no banco de dados.")
+        except Exception as e:
+            logging.error(f"Falha ao salvar a transação no banco de dados: {e}")
+            await interaction.followup.send("⚠️ Ocorreu um erro ao salvar a transação no banco de dados. A compra foi aprovada, mas não registrada.", ephemeral=True)
+
+
+        # O resto da lógica continua igual
+        produto = ticket_data.get("item_name", "N/A")
         final_embed = discord.Embed(title="✅ Compra Finalizada!", description=f"Sua compra de **{produto}** foi entregue com sucesso!\n\nObrigado pela preferência, {membro.mention}! Este ticket será fechado em 15 segundos.", color=discord.Color.green())
         final_embed.set_thumbnail(url=IMAGE_URL_FOR_EMBEDS)
         await interaction.followup.send(embed=final_embed)
@@ -53,9 +76,11 @@ class Admin(commands.Cog):
             log_embed = discord.Embed(title="✅ Log de Compra", color=discord.Color.green(), timestamp=datetime.now(BR_TIMEZONE))
             log_embed.add_field(name="Cliente", value=f"{membro.mention} (`{membro.id}`)", inline=False)
             log_embed.add_field(name="Produto", value=produto, inline=True)
-            log_embed.add_field(name="Valor", value=f"R$ {valor:.2f}", inline=True)
+            log_embed.add_field(name="Valor", value=f"R$ {ticket_data.get('final_price', 0.0):.2f}", inline=True)
             log_embed.add_field(name="Atendente", value=interaction.user.mention, inline=False)
             log_embed.add_field(name="Ticket", value=channel.name, inline=False)
+            if ticket_data.get('gamepass_link'):
+                 log_embed.add_field(name="Link da Gamepass", value=ticket_data['gamepass_link'], inline=False)
             log_embed.set_thumbnail(url=membro.display_avatar.url)
             await log_channel.send(embed=log_embed)
 
@@ -64,7 +89,6 @@ class Admin(commands.Cog):
         
         await asyncio.sleep(15)
         await channel.delete(reason="Ticket aprovado e concluído.")
-
 
     @app_commands.command(name="fechar", description="[Admin] Fecha um ticket manualmente.")
     @app_commands.guilds(discord.Object(id=GUILD_ID))
