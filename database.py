@@ -2,7 +2,7 @@
 import os
 import logging
 from sqlalchemy import (
-    create_engine, MetaData, Table, Column, Integer, String, Float, DateTime, BigInteger
+    create_engine, MetaData, Table, Column, Integer, String, Float, DateTime, BigInteger, Boolean
 )
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -22,7 +22,7 @@ transactions = Table(
     Column('id', Integer, primary_key=True),
     Column('user_id', BigInteger, nullable=False),
     Column('user_name', String(100)),
-    Column('channel_id', BigInteger, nullable=True), # <-- NOVO
+    Column('channel_id', BigInteger, nullable=True),
     Column('product_name', String(255), nullable=False),
     Column('price', Float, nullable=False),
     Column('gamepass_link', String(255), nullable=True),
@@ -32,7 +32,8 @@ transactions = Table(
     Column('delivery_admin_id', BigInteger, nullable=True),
     Column('payment_method', String(50), default='PIX'),
     Column('timestamp', DateTime, default=datetime.utcnow),
-    Column('closed_at', DateTime, nullable=True) # <-- NOVO
+    Column('closed_at', DateTime, nullable=True),
+    Column('is_archived', Boolean, default=False, nullable=False)
 )
 
 async def init_db():
