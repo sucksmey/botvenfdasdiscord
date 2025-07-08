@@ -8,7 +8,7 @@ import logging
 import asyncio
 from config import *
 import database
-from cogs.cliente import ReviewView # Importa a view de avaliação
+from cogs.cliente import CustomerAreaView # <-- A LINHA QUE FALTAVA FOI ADICIONADA AQUI
 
 class Admin(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -47,6 +47,7 @@ class Admin(commands.Cog):
                             
                             if transcript_channel:
                                 await transcript_channel.send(f"🗑️ O ticket `entregue-{ticket.user_name}` (ID: {channel_id}) foi deletado automaticamente após {days_to_keep} dias.")
+
                         except discord.errors.NotFound:
                             logging.warning(f"Não foi possível deletar o canal {channel_id}, pois ele não foi encontrado.")
                         except Exception as e:
