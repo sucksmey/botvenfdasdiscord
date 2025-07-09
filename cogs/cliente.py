@@ -107,6 +107,7 @@ class StartReviewView(discord.ui.View):
     def __init__(self, transaction_id: int):
         super().__init__(timeout=None)
         self.transaction_id = transaction_id
+        # Define um custom_id único para o botão para que o bot possa encontrá-lo
         self.children[0].custom_id = f"start_review_button_{transaction_id}"
 
     @discord.ui.button(label="⭐ Avaliar Atendimento", style=discord.ButtonStyle.primary)
