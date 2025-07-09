@@ -6,7 +6,7 @@ from discord import app_commands
 import logging
 from config import *
 import database
-from sqlalchemy import update
+from sqlalchemy import update, select
 from datetime import datetime
 
 # --- FUNÇÃO HELPER PARA ENVIAR A AVALIAÇÃO FINAL ---
@@ -26,21 +26,21 @@ async def post_review_embed(interaction: discord.Interaction, transaction_id: in
 
     try:
         user = await interaction.client.fetch_user(transaction.user_id)
-        handler = await interaction.client.fetch_user(transaction.handler_admin_id)
-        delivery = await interaction.client.fetch_user(transaction.delivery_admin_id)
+        handler = await interaction.client.fetch_user(transaction.handler_admin_id) if transaction.handler_admin_id else interaction.user
+        delivery = await interaction.client.fetch_user(transaction.delivery_admin_id) if transaction.delivery_admin_id else interaction.user
     except discord.NotFound:
         logging.error("Não foi possível encontrar um dos usuários para postar a avaliação.")
-        return
+        user = handler = delivery = "Usuário não encontrado"
 
     embed = discord.Embed(title="🌟 Nova Avaliação de Cliente!", color=discord.Color.gold(), timestamp=datetime.now(BR_TIMEZONE))
-    embed.set_author(name=user.name, icon_url=user.display_avatar.url)
+    embed.set_author(name=user.name if isinstance(user, discord.User) else user, icon_url=user.display_avatar.url if isinstance(user, discord.User) else None)
     
-    embed.add_field(name="Cliente", value=user.mention, inline=True)
-    embed.add_field(name="Atendente", value=handler.mention, inline=True)
-    embed.add_field(name="Entregador", value=delivery.mention, inline=True)
+    embed.add_field(name="Cliente", value=user.mention if isinstance(user, discord.User) else user, inline=True)
+    embed.add_field(name="Atendente", value=handler.mention if isinstance(handler, discord.User) else handler, inline=True)
+    embed.add_field(name="Entregador", value=delivery.mention if isinstance(delivery, discord.User) else delivery, inline=True)
     
     embed.add_field(name="Produto Comprado", value=transaction.product_name, inline=True)
-    embed.add_field(name="Método de Pagamento", value=transaction.payment_method, inline=True)
+    embed.add_field(name="Método de Pagamento", value=transaction.payment_method or "PIX", inline=True)
     embed.add_field(name="Nota", value=f"**{transaction.review_rating} / 10** ✨", inline=True)
 
     if transaction.review_text and transaction.review_text != "Nenhum comentário.":
@@ -56,7 +56,15 @@ class ReviewModal(discord.ui.Modal, title="Deixe seu Feedback"):
         self.transaction_id = transaction_id
 
     comment = discord.ui.TextInput(
-        label="Seu comentário (opcional)",
+        label="Qual nota você daria para o atendimento?",
+        style=discord.TextStyle.short,
+        placeholder="Digite sua nota de 1 a 10...",
+        required=True,
+        max_length=2
+    )
+
+    feedback = discord.ui.TextInput(
+        label="Deixe um comentário (opcional)",
         style=discord.TextStyle.paragraph,
         placeholder="Gostei muito do atendimento, foi rápido e...",
         required=False,
@@ -64,55 +72,58 @@ class ReviewModal(discord.ui.Modal, title="Deixe seu Feedback"):
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-        review_text = self.comment.value or "Nenhum comentário."
+        try:
+            rating = int(self.comment.value)
+            if not 1 <= rating <= 10:
+                raise ValueError
+        except ValueError:
+            await interaction.response.send_message("Por favor, insira uma nota válida de 1 a 10.", ephemeral=True)
+            return
+
+        review_text = self.feedback.value or "Nenhum comentário."
         
         async with database.engine.connect() as conn:
-            query = update(database.transactions).where(database.transactions.c.id == self.transaction_id).values(review_text=review_text)
+            query = update(database.transactions).where(database.transactions.c.id == self.transaction_id).values(
+                review_rating=rating,
+                review_text=review_text
+            )
             await conn.execute(query)
             await conn.commit()
             
-        await interaction.response.send_message("Obrigado pelo seu comentário!", ephemeral=True)
+        await interaction.response.send_message("Sua avaliação foi enviada com sucesso! Muito obrigado.", ephemeral=True)
         await post_review_embed(interaction, self.transaction_id)
+        
+        # Desativa o botão original
+        original_message = await interaction.original_response()
+        view = discord.ui.View.from_message(original_message)
+        for child in view.children:
+            if isinstance(child, discord.ui.Button) and child.custom_id == f"start_review_button_{self.transaction_id}":
+                child.disabled = True
+                break
+        await original_message.edit(view=view)
 
 
-# --- VIEW PARA PEDIR A AVALIAÇÃO ---
-class ReviewView(discord.ui.View):
+# --- VIEW PARA INICIAR A AVALIAÇÃO ---
+class StartReviewView(discord.ui.View):
     def __init__(self, transaction_id: int):
         super().__init__(timeout=None)
         self.transaction_id = transaction_id
-        self.add_item(self.RatingSelect(transaction_id))
 
-    class RatingSelect(discord.ui.Select):
-        def __init__(self, transaction_id: int):
-            self.transaction_id = transaction_id
-            options = [discord.SelectOption(label=f"Nota {i}", value=str(i), emoji="⭐") for i in range(10, 0, -1)]
-            super().__init__(placeholder="Escolha sua nota de 1 a 10...", min_values=1, max_values=1, custom_id=f"rating_select:{transaction_id}")
+    @discord.ui.button(label="⭐ Avaliar Atendimento", style=discord.ButtonStyle.primary, custom_id=f"start_review_button")
+    async def start_review_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Garante que apenas o cliente da transação possa avaliar
+        async with database.engine.connect() as conn:
+            query = select(database.transactions.c.user_id).where(database.transactions.c.id == self.transaction_id)
+            result = await conn.execute(query)
+            owner_id = result.scalar_one_or_none()
 
-        async def callback(self, interaction: discord.Interaction):
-            rating = int(self.values[0])
-            async with database.engine.connect() as conn:
-                query = update(database.transactions).where(database.transactions.c.id == self.transaction_id).values(review_rating=rating)
-                await conn.execute(query)
-                await conn.commit()
+        if interaction.user.id != owner_id:
+            await interaction.response.send_message("Apenas o cliente que realizou esta compra pode avaliá-la.", ephemeral=True)
+            return
             
-            await interaction.response.send_message(f"Você avaliou com nota {rating}! Obrigado. Se quiser, pode deixar um comentário.", ephemeral=True)
-            
-            self.disabled = True
-            await interaction.message.edit(view=self.view)
-
-            async with database.engine.connect() as conn:
-                query_check = database.transactions.select().where(database.transactions.c.id == self.transaction_id)
-                result = await conn.execute(query_check)
-                transaction = result.first()
-                if transaction and transaction.review_text:
-                    await post_review_embed(interaction, self.transaction_id)
-
-    @discord.ui.button(label="Deixar um Comentário", style=discord.ButtonStyle.secondary, custom_id=f"comment_button", emoji="📝")
-    async def comment_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(ReviewModal(transaction_id=self.transaction_id))
 
-
-# --- ÁREA DO CLIENTE E VIP ---
+# --- ÁREA DO CLIENTE E VIP (sem alterações) ---
 
 async def show_purchase_history(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
@@ -132,7 +143,7 @@ async def show_purchase_history(interaction: discord.Interaction):
         total_spent = 0.0
         for purchase in user_purchases[:10]:
             purchase_date = discord.utils.format_dt(purchase.timestamp, style='f')
-            description_lines.append(f"**Produto:** {purchase.product_name}\n**Valor:** R$ {purchase.price:.2f}\n**Data:** {purchase_date} (UTC)\n--------------------")
+            description_lines.append(f"**Produto:** {purchase.product_name}\n**Valor:** R$ {purchase.price:.2f}\n**Data:** {purchase_date}\n--------------------")
             total_spent += purchase.price
         
         embed.description = "\n".join(description_lines)
@@ -188,6 +199,37 @@ class VipPurchaseView(discord.ui.View):
 class Cliente(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+
+    # NOVO COMANDO /avaliacao
+    @app_commands.command(name="avaliacao", description="[Admin] Envia o pedido de avaliação para o cliente neste ticket.")
+    @app_commands.guilds(discord.Object(id=GUILD_ID))
+    @app_commands.checks.has_role(ADMIN_ROLE_ID)
+    async def request_review(self, interaction: discord.Interaction):
+        channel = interaction.channel
+        if not channel.name.startswith("entregue-"):
+            await interaction.response.send_message("Este comando só pode ser usado em um canal de ticket arquivado.", ephemeral=True)
+            return
+        
+        # Encontra a transação mais recente para este canal
+        async with database.engine.connect() as conn:
+            query = select(database.transactions.c.id).where(database.transactions.c.channel_id == channel.id).order_by(database.transactions.c.id.desc()).limit(1)
+            result = await conn.execute(query)
+            transaction_id = result.scalar_one_or_none()
+
+        if not transaction_id:
+            await interaction.response.send_message("Não encontrei uma compra registrada para este ticket.", ephemeral=True)
+            return
+        
+        review_embed = discord.Embed(
+            title="⭐ Avalie sua Compra!",
+            description=f"Sua opinião é muito importante para nós. Por favor, clique no botão abaixo para deixar uma nota e um comentário sobre sua experiência.",
+            color=ROSE_COLOR
+        )
+        # Passa o ID da transação para a View
+        view = StartReviewView(transaction_id=transaction_id)
+        
+        await interaction.response.send_message(embed=review_embed, view=view)
+
 
     @app_commands.command(name="minhascompras", description="Mostra o seu histórico de compras na loja.")
     @app_commands.guilds(discord.Object(id=GUILD_ID))
