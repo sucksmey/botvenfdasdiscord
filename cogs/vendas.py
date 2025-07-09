@@ -10,7 +10,59 @@ from datetime import datetime
 from config import *
 import database
 
-# --- FUNÇÃO HELPER PARA PROSSEGUIR COM A VENDA ---
+# --- NOVA VIEW PARA ESCOLHA DE PAGAMENTO ---
+class PaymentMethodView(discord.ui.View):
+    def __init__(self, item_name: str, price: float):
+        super().__init__(timeout=300)
+        self.item_name = item_name
+        self.price = price
+
+    async def handle_pix_payment(self, interaction: discord.Interaction):
+        ticket_data = ONGOING_SALES_DATA.get(interaction.channel.id)
+        if not ticket_data:
+            await interaction.response.send_message("Este ticket parece ter expirado.", ephemeral=True)
+            return
+
+        ticket_data.update({"status": "awaiting_payment", "final_price": self.price, "item_name": self.item_name, "payment_method": "PIX"})
+        
+        pix_embed = discord.Embed(title="Pagamento via PIX", description="Use o QR Code acima ou a chave **Copia e Cola** enviada abaixo.", color=ROSE_COLOR).set_footer(text="Após pagar, por favor, envie o comprovante neste chat.").set_image(url=QR_CODE_URL)
+        
+        await interaction.response.send_message(embed=pix_embed)
+        await interaction.channel.send(f"`{PIX_KEY_MANUAL}`")
+
+    async def handle_manual_payment(self, interaction: discord.Interaction, method: str):
+        ticket_data = ONGOING_SALES_DATA.get(interaction.channel.id)
+        if not ticket_data:
+            await interaction.response.send_message("Este ticket parece ter expirado.", ephemeral=True)
+            return
+
+        ticket_data.update({"status": "awaiting_human_payment", "payment_method": method})
+        handler_user = interaction.client.get_user(ROBUX_DELIVERY_USER_ID)
+        mention = handler_user.mention if handler_user else f"<@{ROBUX_DELIVERY_USER_ID}>"
+
+        await interaction.response.send_message(f"Certo! O atendente {mention} foi notificado e irá te enviar o link de pagamento para **{method}** em breve. Por favor, aguarde.")
+
+    @discord.ui.button(label="PIX", style=discord.ButtonStyle.primary, emoji="📲")
+    async def pix_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        for item in self.children: item.disabled = True
+        await interaction.message.edit(view=self)
+        await self.handle_pix_payment(interaction)
+
+    @discord.ui.button(label="Boleto", style=discord.ButtonStyle.secondary, emoji="📄")
+    async def boleto_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        for item in self.children: item.disabled = True
+        await interaction.message.edit(view=self)
+        await self.handle_manual_payment(interaction, "Boleto")
+
+    @discord.ui.button(label="Cartão de Crédito", style=discord.ButtonStyle.secondary, emoji="💳")
+    async def card_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        for item in self.children: item.disabled = True
+        await interaction.message.edit(view=self)
+        await self.handle_manual_payment(interaction, "Cartão de Crédito")
+
+
+# --- O RESTO DO CÓDIGO ---
+
 async def proceed_with_sale(channel: discord.TextChannel, user: discord.Member, selected_product: str):
     product_info = PRODUCTS_DATA[selected_product]
     embed = discord.Embed(title=f"Itens para: {selected_product} {product_info['emoji']}", color=ROSE_COLOR)
@@ -28,7 +80,6 @@ async def proceed_with_sale(channel: discord.TextChannel, user: discord.Member, 
                 price_lines.append(f"**{item}**: R$ {final_price:.2f} (Preço VIP ✨)")
             else:
                 price_lines.append(f"**{item}**: R$ {final_price:.2f}")
-
         prices_text = "\n".join(price_lines)
         embed.description = ("Confira nossos pacotes padrão abaixo ou **digite qualquer outro valor que desejar** (ex: `2500`).")
         embed.add_field(name="Pacotes Padrão", value=prices_text, inline=False)
@@ -43,11 +94,18 @@ async def proceed_with_sale(channel: discord.TextChannel, user: discord.Member, 
         embed.description = ("Para este item, um de nossos atendentes irá te ajudar em breve para fazer o orçamento.")
         status = "awaiting_human"
     
+    # Adiciona as formas de pagamento ao embed
+    embed.add_field(
+        name="Formas de Pagamento Disponíveis",
+        value="> **Pix:** Aprovação Imediata (após envio do comprovante)\n"
+              "> **Boleto:** Aprovação em até 3 dias úteis\n"
+              "> **Cartão de Crédito:** Parcelamento em até 12x (com juros)",
+        inline=False
+    )
+    
     await channel.send(embed=embed)
     if channel.id in ONGOING_SALES_DATA:
         ONGOING_SALES_DATA[channel.id].update({"status": status, "is_vip": is_vip})
-
-# --- VIEWS DE CONFIRMAÇÃO ---
 
 class TermsConfirmationView(discord.ui.View):
     def __init__(self, selected_product: str):
@@ -57,16 +115,11 @@ class TermsConfirmationView(discord.ui.View):
 
     @discord.ui.button(label="Concordo e quero prosseguir", style=discord.ButtonStyle.success, custom_id="terms_confirm_button")
     async def confirm_terms(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Responde imediatamente para o Discord não dar timeout
         await interaction.response.defer()
-
         for item in self.children:
             item.disabled = True
         await interaction.message.edit(view=self)
-        
-        # Agora sim, prossegue com a venda
         await proceed_with_sale(interaction.channel, interaction.user, self.selected_product)
-
 
 class RegionalPriceConfirmationView(discord.ui.View):
     def __init__(self):
@@ -75,11 +128,9 @@ class RegionalPriceConfirmationView(discord.ui.View):
     async def proceed_to_delivery(self, interaction: discord.Interaction):
         ticket_data = ONGOING_SALES_DATA.get(interaction.channel.id)
         if not ticket_data: return
-
         delivery_user = interaction.client.get_user(ROBUX_DELIVERY_USER_ID)
         mention = delivery_user.mention if delivery_user else f"<@{ROBUX_DELIVERY_USER_ID}>"
         await interaction.channel.send(f"Confirmado! O responsável pela entrega, {mention}, foi notificado e fará a compra em breve.")
-        
         try:
             member = await interaction.guild.fetch_member(ticket_data['client_id'])
             await interaction.channel.edit(name=f"entregar-{member.name.split('#')[0]}")
@@ -101,7 +152,6 @@ class RegionalPriceConfirmationView(discord.ui.View):
         if interaction.channel.id in ONGOING_SALES_DATA:
             ONGOING_SALES_DATA[interaction.channel.id]['status'] = 'awaiting_regional_price_fixed'
 
-# --- VIEWS PRINCIPAIS E FUNÇÕES ---
 class ProductSelect(discord.ui.Select):
     def __init__(self):
         options = [discord.SelectOption(label=name, emoji=data["emoji"]) for name, data in PRODUCTS_DATA.items()]
@@ -130,11 +180,7 @@ class ProductSelect(discord.ui.Select):
 
         ticket_num = int(datetime.now().timestamp()) % 10000
         channel_name = f"ticket-{user.name}-{ticket_num:04d}"
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True),
-            admin_role: discord.PermissionOverwrite(read_messages=True, send_messages=False)
-        }
+        overwrites = { guild.default_role: discord.PermissionOverwrite(read_messages=False), user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True), admin_role: discord.PermissionOverwrite(read_messages=True, send_messages=False)}
         new_channel = await guild.create_text_channel(name=channel_name, category=category, overwrites=overwrites, topic=f"Ticket de {user.display_name} | Produto: {selected_product} | ID: {user.id}")
         
         ONGOING_SALES_DATA[new_channel.id] = {"client_id": user.id, "product_name": selected_product}
@@ -154,14 +200,12 @@ class SetupView(discord.ui.View):
         for product, data in PRODUCTS_DATA.items():
             if data.get("prices"):
                 price_list = []
-                # Mostra preços VIP para Robux se o usuário for VIP
                 if product == "Robux" and any(role.id == VIP_ROLE_ID for role in button_interaction.user.roles):
                     for item, price in data["prices"].items():
                         vip_price = data.get("vip_prices", {}).get(item, price)
                         price_list.append(f"**{item}**: R$ {vip_price:.2f}")
                 else:
                     price_list = [f"**{item}**: R$ {price:.2f}" for item, price in data["prices"].items()]
-                
                 embed.add_field(name=f"{data['emoji']} {product}", value="\n".join(price_list), inline=True)
         
         embed.set_footer(text="Para comprar, selecione uma opção no menu acima.")
@@ -195,21 +239,16 @@ class GamepassConfirmationView(discord.ui.View):
 def calculate_robux_price(amount: int, is_vip: bool = False) -> float:
     if amount <= 0:
         return 0.0
-    
     robux_prices = PRODUCTS_DATA["Robux"]["prices"]
     robux_vip_prices = PRODUCTS_DATA["Robux"].get("vip_prices", {})
-
     if is_vip and f"{amount} Robux" in robux_vip_prices:
         return robux_vip_prices[f"{amount} Robux"]
     if f"{amount} Robux" in robux_prices:
         return robux_prices[f"{amount} Robux"]
-
     base_1k_price = robux_vip_prices.get("1000 Robux", robux_prices["1000 Robux"]) if is_vip else robux_prices["1000 Robux"]
-    
     thousands = amount // 1000
     remainder = amount % 1000
     price = thousands * base_1k_price
-    
     if remainder > 0:
         closest_hundred = math.ceil(remainder / 100) * 100
         remainder_price = robux_prices.get(f"{closest_hundred} Robux")
@@ -238,7 +277,6 @@ class Vendas(commands.Cog):
         if robux <= 0:
             await interaction.response.send_message("Por favor, insira um valor de Robux maior que zero.", ephemeral=True)
             return
-        
         gamepass_value = math.ceil(robux / 0.7)
         embed = discord.Embed(title="🧮 Calculadora de Game Pass", description=f"Para o comprador receber **{robux} Robux**, você precisa criar uma Game Pass no valor de **{gamepass_value} Robux**.", color=ROSE_COLOR)
         await interaction.response.send_message(embed=embed)
@@ -264,13 +302,8 @@ class Vendas(commands.Cog):
             
         if status == "awaiting_regional_price_fixed":
             class MockInteraction:
-                def __init__(self, channel, client, guild):
-                    self.channel = channel
-                    self.client = client
-                    self.guild = guild
-            mock_interaction = MockInteraction(message.channel, self.bot, message.guild)
-            view = RegionalPriceConfirmationView()
-            await view.proceed_to_delivery(mock_interaction)
+                def __init__(self, channel, client, guild): self.channel, self.client, self.guild = channel, client, guild
+            await RegionalPriceConfirmationView().proceed_to_delivery(MockInteraction(message.channel, self.bot, message.guild))
             return
 
         if status == "awaiting_payment" and message.attachments:
@@ -296,71 +329,39 @@ class Vendas(commands.Cog):
                 ticket_data["status"] = "delivery_pending"
             return
 
-        if status == "awaiting_robux_choice":
-            user_input = message.content.strip()
+        if status in ["awaiting_robux_choice", "awaiting_product_choice"]:
             is_vip = ticket_data.get("is_vip", False)
-            robux_prices = PRODUCTS_DATA["Robux"]["prices"]
-            robux_vip_prices = PRODUCTS_DATA["Robux"].get("vip_prices", {})
             price = None
             item_name = None
 
-            if is_vip and f"{user_input} Robux" in robux_vip_prices:
-                price = robux_vip_prices[f"{user_input} Robux"]
-                item_name = f"{user_input} Robux"
-            elif f"{user_input} Robux" in robux_prices:
-                price = robux_prices[f"{user_input} Robux"]
-                item_name = f"{user_input} Robux"
-            
-            if price is None:
-                for name, p_normal in robux_prices.items():
-                    if re.sub(r'[^0-9]', '', name) == user_input:
-                        p_vip = robux_vip_prices.get(name)
-                        price = p_vip if is_vip and p_vip else p_normal
-                        item_name = name
-                        break
-            
-            if price:
-                pass 
-            else:
+            if status == "awaiting_robux_choice":
                 try:
-                    amount = int(re.sub(r'[^0-9]', '', user_input))
+                    amount = int(re.sub(r'[^0-G]', '', message.content.strip()))
                     if amount <= 0: raise ValueError()
                     price = calculate_robux_price(amount, is_vip)
                     item_name = f"{amount} Robux"
                 except (ValueError, TypeError):
-                    await message.channel.send("Não entendi o valor. Por favor, digite um dos pacotes da lista ou um número (ex: `9500`).")
+                    await message.channel.send("Não entendi o valor. Por favor, digite um número (ex: `9500`).")
+                    return
+            else: # awaiting_product_choice
+                product_category = ticket_data.get("product_name")
+                product_info = PRODUCTS_DATA.get(product_category, {})
+                user_choice = message.content.strip()
+                user_choice_num = re.sub(r'[^0-9]', '', user_choice)
+                for p_name, p_price in product_info.get("prices", {}).items():
+                    p_name_num = re.sub(r'[^0-9]', '', p_name)
+                    if user_choice.lower() == p_name.lower() or (user_choice_num and user_choice_num == p_name_num):
+                        item_name = p_name
+                        price = p_price
+                        break
+                if not item_name:
+                    await message.channel.send("Não encontrei este item. Por favor, digite o nome ou o valor exatamente como na tabela.")
                     return
 
-            ticket_data.update({"status": "awaiting_payment", "final_price": price, "item_name": item_name})
-            await message.channel.send(f"Ótima escolha! O valor para **{item_name}** é de **R$ {price:.2f}**.")
-            pix_embed = discord.Embed(title="Pagamento via PIX", description="Use o QR Code acima ou a chave **Copia e Cola** enviada abaixo.", color=ROSE_COLOR).set_footer(text="Após pagar, por favor, envie o comprovante neste chat.").set_image(url=QR_CODE_URL)
-            await message.channel.send(embed=pix_embed)
-            await message.channel.send(f"`{PIX_KEY_MANUAL}`")
-            return
-
-        if status == "awaiting_product_choice":
-            product_category = ticket_data.get("product_name")
-            product_info = PRODUCTS_DATA.get(product_category, {})
-            user_choice = message.content.strip()
-            user_choice_num = re.sub(r'[^0-9]', '', user_choice)
-            matched_item = None
-            for item_name, price in product_info.get("prices", {}).items():
-                item_name_num = re.sub(r'[^0-9]', '', item_name)
-                if user_choice.lower() == item_name.lower() or (user_choice_num and user_choice_num == item_name_num):
-                    matched_item = item_name
-                    break
-            
-            if matched_item:
-                is_vip = ticket_data.get("is_vip", False)
-                # Lógica de desconto VIP para outros produtos, se houver, entraria aqui
-                price = product_info["prices"][matched_item]
-                ticket_data.update({"status": "awaiting_payment", "final_price": price, "item_name": matched_item})
-                await message.channel.send(f"Ótima escolha! O valor para **{matched_item}** é de **R$ {price:.2f}**.")
-                pix_embed = discord.Embed(title="Pagamento via PIX", description="Use o QR Code acima ou a chave **Copia e Cola** enviada abaixo.", color=ROSE_COLOR).set_footer(text="Após pagar, por favor, envie o comprovante neste chat.").set_image(url=QR_CODE_URL)
-                await message.channel.send(embed=pix_embed)
-                await message.channel.send(f"`{PIX_KEY_MANUAL}`")
-            else:
-                await message.channel.send("Não encontrei este item. Por favor, digite o nome ou o valor exatamente como está na tabela.")
+            ticket_data.update({"final_price": price, "item_name": item_name})
+            payment_embed = discord.Embed(title=f"Produto: {item_name} | Valor: R$ {price:.2f}", description="Qual será a forma de pagamento?", color=ROSE_COLOR)
+            await message.channel.send(embed=payment_embed, view=PaymentMethodView(item_name, price))
+            ticket_data["status"] = "awaiting_payment_method_selection"
             return
 
 async def setup(bot: commands.Bot):
