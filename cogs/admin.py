@@ -8,7 +8,8 @@ import logging
 import asyncio
 from config import *
 import database
-from cogs.cliente import ReviewView, CustomerAreaView
+from sqlalchemy import select
+from cogs.cliente import ReviewView, CustomerAreaView, StartReviewView # Importa a nova view que inicia a avaliação
 
 class Admin(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -102,9 +103,9 @@ class Admin(commands.Cog):
                 await interaction.followup.send("Não consegui recuperar as informações deste ticket pelo tópico do canal.", ephemeral=True)
             return
 
-        await interaction.response.send_message("Este comando só pode ser usado em um ticket de venda ativo.", ephemeral=True)
+        await interaction.response.send_message("Este comando só pode ser usado em um canal de ticket de venda ativo.", ephemeral=True)
 
-    @app_commands.command(name="aprovar", description="[Admin] Aprova a compra e envia o pedido de avaliação.")
+    @app_commands.command(name="aprovar", description="[Admin] Aprova a compra e move o ticket para a categoria de entregues.")
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.checks.has_role(ADMIN_ROLE_ID)
     @app_commands.describe(produto="[Opcional] Nome do produto, se o bot esqueceu.", valor="[Opcional] Valor da compra, se o bot esqueceu.")
@@ -119,14 +120,13 @@ class Admin(commands.Cog):
                 try:
                     client_id = int(channel.topic.split("ID: ")[1].strip())
                     if produto and valor is not None:
-                        # Recria os dados do ticket com as informações manuais
                         ticket_data = {'client_id': client_id, 'item_name': produto, 'final_price': valor}
                         await interaction.followup.send("✅ Ticket recuperado com os dados manuais.", ephemeral=True)
                     else:
                         await interaction.followup.send("⚠️ O bot esqueceu os detalhes deste ticket. Por favor, use o comando `/aprovar` preenchendo os campos `produto` e `valor`.", ephemeral=True)
                         return
                 except (IndexError, ValueError):
-                     await interaction.followup.send("❌ Não foi possível recuperar os dados do cliente deste ticket. Não é possível aprovar.", ephemeral=True)
+                     await interaction.followup.send("❌ Não foi possível recuperar os dados do cliente deste ticket.", ephemeral=True)
                      return
             else:
                 await interaction.followup.send("❌ Não é um ticket válido ou as informações foram perdidas.", ephemeral=True)
@@ -143,23 +143,20 @@ class Admin(commands.Cog):
         final_price = ticket_data.get("final_price", 0.0)
         
         # Salva no DB
-        new_transaction_id = None
         try:
             async with database.engine.connect() as conn:
                 result = await conn.execute(
                     database.transactions.insert().values(
                         user_id=membro.id, user_name=membro.name, channel_id=channel.id,
-                        product_name=final_product_name,
-                        price=final_price,
+                        product_name=final_product_name, price=final_price,
                         gamepass_link=ticket_data.get("gamepass_link"),
                         handler_admin_id=interaction.user.id,
                         delivery_admin_id=ROBUX_DELIVERY_USER_ID,
                         timestamp=datetime.utcnow(), closed_at=datetime.utcnow()
                     ).returning(database.transactions.c.id)
                 )
-                new_transaction_id = result.scalar_one()
                 await conn.commit()
-            logging.info(f"Transação ID {new_transaction_id} salva no banco de dados.")
+            logging.info(f"Transação salva no banco de dados.")
         except Exception as e:
             logging.error(f"Falha ao salvar a transação no banco de dados: {e}")
             await interaction.followup.send("⚠️ Ocorreu um erro ao salvar a transação no banco de dados.", ephemeral=True)
@@ -197,17 +194,9 @@ class Admin(commands.Cog):
             except Exception as e:
                 logging.error(f"Falha ao mover/arquivar o canal {channel.id}: {e}")
         
-        # Envia pedido de avaliação
-        if new_transaction_id:
-            review_embed = discord.Embed(title="⭐ Avalie sua Compra!", description=f"Obrigado, {membro.mention}! Sua opinião é muito importante. Por favor, deixe uma nota e, se quiser, um comentário.", color=ROSE_COLOR)
-            try:
-                await channel.send(embed=review_embed, view=ReviewView(transaction_id=new_transaction_id))
-            except Exception as e:
-                logging.error(f"Não foi possível enviar o pedido de avaliação no canal {channel.id}: {e}")
-
         if channel.id in ONGOING_SALES_DATA:
             del ONGOING_SALES_DATA[channel.id]
-
+            
     @app_commands.command(name="aprovarvip", description="[Admin] Aprova a compra de VIP para um membro.")
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.checks.has_role(ADMIN_ROLE_ID)
