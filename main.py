@@ -9,7 +9,7 @@ import asyncio
 import logging
 from config import GUILD_ID
 from cogs.vendas import SetupView
-from cogs.cliente import CustomerAreaView # Importa a nova view do cliente
+from cogs.cliente import CustomerAreaView, VipPurchaseView
 
 # Carrega o token do arquivo .env ou das variáveis de ambiente da Railway
 load_dotenv()
@@ -36,7 +36,8 @@ class IsrabuyBot(commands.Bot):
         # Adiciona as views persistentes ANTES de conectar
         if not self.persistent_views_added:
             self.add_view(SetupView())
-            self.add_view(CustomerAreaView()) # Registra o painel do cliente
+            self.add_view(CustomerAreaView())
+            self.add_view(VipPurchaseView())
             self.persistent_views_added = True
             logging.info("Views persistentes registradas.")
 
