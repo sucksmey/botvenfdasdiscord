@@ -11,8 +11,7 @@ from config import *
 import database
 
 # --- FUNÇÃO HELPER PARA PROSSEGUIR COM A VENDA ---
-async def proceed_with_sale(interaction: discord.Interaction, selected_product: str):
-    user = interaction.user
+async def proceed_with_sale(channel: discord.TextChannel, user: discord.Member, selected_product: str):
     product_info = PRODUCTS_DATA[selected_product]
     embed = discord.Embed(title=f"Itens para: {selected_product} {product_info['emoji']}", color=ROSE_COLOR)
     embed.set_thumbnail(url=IMAGE_URL_FOR_EMBEDS)
@@ -35,10 +34,7 @@ async def proceed_with_sale(interaction: discord.Interaction, selected_product: 
         embed.add_field(name="Pacotes Padrão", value=prices_text, inline=False)
         status = "awaiting_robux_choice"
     elif product_info.get("prices"):
-        price_list = []
-        for item, price in product_info.get("prices", {}).items():
-            # A lógica de desconto VIP para outros produtos, se houver, entraria aqui
-            price_list.append(f"**{item}**: R$ {price:.2f}")
+        price_list = [f"**{item}**: R$ {price:.2f}" for item, price in product_info.get("prices", {}).items()]
         prices_text = "\n".join(price_list)
         embed.description = ("Confira nossos preços abaixo e **digite o nome exato ou o valor numérico do item** que você deseja.")
         embed.add_field(name="Tabela de Preços", value=prices_text, inline=False)
@@ -47,9 +43,9 @@ async def proceed_with_sale(interaction: discord.Interaction, selected_product: 
         embed.description = ("Para este item, um de nossos atendentes irá te ajudar em breve para fazer o orçamento.")
         status = "awaiting_human"
     
-    await interaction.channel.send(embed=embed)
-    if interaction.channel.id in ONGOING_SALES_DATA:
-        ONGOING_SALES_DATA[interaction.channel.id].update({"status": status, "is_vip": is_vip})
+    await channel.send(embed=embed)
+    if channel.id in ONGOING_SALES_DATA:
+        ONGOING_SALES_DATA[channel.id].update({"status": status, "is_vip": is_vip})
 
 # --- VIEWS DE CONFIRMAÇÃO ---
 
@@ -61,12 +57,16 @@ class TermsConfirmationView(discord.ui.View):
 
     @discord.ui.button(label="Concordo e quero prosseguir", style=discord.ButtonStyle.success, custom_id="terms_confirm_button")
     async def confirm_terms(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Responde imediatamente para o Discord não dar timeout
+        await interaction.response.defer()
+
         for item in self.children:
             item.disabled = True
         await interaction.message.edit(view=self)
         
-        await interaction.response.send_message("Obrigado por concordar! Carregando opções...", ephemeral=True)
-        await proceed_with_sale(interaction, self.selected_product)
+        # Agora sim, prossegue com a venda
+        await proceed_with_sale(interaction.channel, interaction.user, self.selected_product)
+
 
 class RegionalPriceConfirmationView(discord.ui.View):
     def __init__(self):
@@ -102,7 +102,6 @@ class RegionalPriceConfirmationView(discord.ui.View):
             ONGOING_SALES_DATA[interaction.channel.id]['status'] = 'awaiting_regional_price_fixed'
 
 # --- VIEWS PRINCIPAIS E FUNÇÕES ---
-
 class ProductSelect(discord.ui.Select):
     def __init__(self):
         options = [discord.SelectOption(label=name, emoji=data["emoji"]) for name, data in PRODUCTS_DATA.items()]
@@ -220,7 +219,6 @@ def calculate_robux_price(amount: int, is_vip: bool = False) -> float:
             price += remainder * ROBUX_PRICE_PER_UNIT
     return round(price, 2)
 
-
 class Vendas(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -306,7 +304,6 @@ class Vendas(commands.Cog):
             price = None
             item_name = None
 
-            # Tenta casar com o nome completo
             if is_vip and f"{user_input} Robux" in robux_vip_prices:
                 price = robux_vip_prices[f"{user_input} Robux"]
                 item_name = f"{user_input} Robux"
@@ -314,7 +311,6 @@ class Vendas(commands.Cog):
                 price = robux_prices[f"{user_input} Robux"]
                 item_name = f"{user_input} Robux"
             
-            # Se não, tenta casar só com o número
             if price is None:
                 for name, p_normal in robux_prices.items():
                     if re.sub(r'[^0-9]', '', name) == user_input:
@@ -324,9 +320,8 @@ class Vendas(commands.Cog):
                         break
             
             if price:
-                pass # Preço já encontrado
+                pass 
             else:
-                # Se não for um pacote, calcula um valor customizado
                 try:
                     amount = int(re.sub(r'[^0-9]', '', user_input))
                     if amount <= 0: raise ValueError()
@@ -357,8 +352,8 @@ class Vendas(commands.Cog):
             
             if matched_item:
                 is_vip = ticket_data.get("is_vip", False)
-                price = product_info["prices"][matched_item]
                 # Lógica de desconto VIP para outros produtos, se houver, entraria aqui
+                price = product_info["prices"][matched_item]
                 ticket_data.update({"status": "awaiting_payment", "final_price": price, "item_name": matched_item})
                 await message.channel.send(f"Ótima escolha! O valor para **{matched_item}** é de **R$ {price:.2f}**.")
                 pix_embed = discord.Embed(title="Pagamento via PIX", description="Use o QR Code acima ou a chave **Copia e Cola** enviada abaixo.", color=ROSE_COLOR).set_footer(text="Após pagar, por favor, envie o comprovante neste chat.").set_image(url=QR_CODE_URL)
