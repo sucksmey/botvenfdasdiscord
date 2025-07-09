@@ -166,7 +166,7 @@ class Admin(commands.Cog):
         entregues_category = interaction.guild.get_channel(CATEGORY_ENTREGUES_ID)
         if entregues_category:
             try:
-                await channel.set_permissions(membro, send_messages=False, read_messages=True)
+                await channel.set_permissions(membro, send_messages=True, read_messages=True)
                 await channel.edit(category=entregues_category, name=f"entregue-{membro.name.split('#')[0]}-{channel.id % 1000}")
             except Exception as e:
                 logging.error(f"Falha ao mover/arquivar o canal {channel.id}: {e}")
