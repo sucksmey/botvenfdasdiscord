@@ -93,10 +93,11 @@ class ReviewModal(discord.ui.Modal, title="Deixe seu Feedback"):
         await interaction.response.send_message("Sua avaliação foi enviada com sucesso! Muito obrigado.", ephemeral=True)
         await post_review_embed(interaction, self.transaction_id)
         
+        # Desativa o botão original
         original_message = await interaction.original_response()
         view = discord.ui.View.from_message(original_message)
         for child in view.children:
-            if isinstance(child, discord.ui.Button):
+            if isinstance(child, discord.ui.Button) and child.custom_id == f"start_review_button_{self.transaction_id}":
                 child.disabled = True
                 break
         await original_message.edit(view=view)
