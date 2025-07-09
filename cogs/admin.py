@@ -8,6 +8,7 @@ import logging
 import asyncio
 from config import *
 import database
+from cogs.cliente import ReviewView, CustomerAreaView
 
 class Admin(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -35,18 +36,23 @@ class Admin(commands.Cog):
 
                 for ticket in old_tickets_to_delete:
                     channel_id = ticket.channel_id
-                    if not channel_id: continue
+                    if not channel_id:
+                        continue
+                        
                     channel = self.bot.get_channel(channel_id)
                     if channel:
                         try:
                             await channel.delete(reason="Limpeza automática de ticket antigo.")
                             if transcript_channel:
                                 await transcript_channel.send(f"🗑️ O ticket `entregue-{ticket.user_name}` (ID: {channel_id}) foi deletado automaticamente.")
+                        except discord.errors.NotFound:
+                            logging.warning(f"Não foi possível deletar o canal {channel_id}, pois ele não foi encontrado.")
                         except Exception as e:
                             logging.error(f"Erro ao deletar o canal {channel_id}: {e}")
                     
                     update_query = database.transactions.update().where(database.transactions.c.id == ticket.id).values(is_archived=True)
                     await conn.execute(update_query)
+
                 await conn.commit()
             logging.info("Tarefa de limpeza finalizada.")
         except Exception as e:
@@ -95,12 +101,13 @@ class Admin(commands.Cog):
             return
         await interaction.response.send_message("Este comando só pode ser usado em um ticket de venda ativo.", ephemeral=True)
 
-    @app_commands.command(name="aprovar", description="[Admin] Aprova a compra e move o ticket para a categoria de entregues.")
+    @app_commands.command(name="aprovar", description="[Admin] Aprova a compra e envia o pedido de avaliação.")
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.checks.has_role(ADMIN_ROLE_ID)
-    @app_commands.describe(produto="[Opcional] Nome do produto, se o bot esqueceu.", valor="[Opcional] Valor da compra, se o bot esqueceu.")
-    async def aprovar(self, interaction: discord.Interaction, produto: str = None, valor: float = None):
+    @app_commands.describe(produto="[Opcional] Nome do produto, se o bot esqueceu.", valor="[Opcional] Valor da compra. Ex: 4.50 ou 4,50")
+    async def aprovar(self, interaction: discord.Interaction, produto: str = None, valor: str = None):
         await interaction.response.defer()
+        
         channel = interaction.channel
         ticket_data = ONGOING_SALES_DATA.get(channel.id)
         
@@ -109,7 +116,13 @@ class Admin(commands.Cog):
                 try:
                     client_id = int(channel.topic.split("ID: ")[1].strip())
                     if produto and valor is not None:
-                        ticket_data = {'client_id': client_id, 'item_name': produto, 'final_price': valor}
+                        try:
+                            # Converte o valor de texto para número, trocando vírgula por ponto
+                            corrected_valor = float(valor.replace(',', '.'))
+                            ticket_data = {'client_id': client_id, 'item_name': produto, 'final_price': corrected_valor}
+                        except ValueError:
+                            await interaction.followup.send("⚠️ O valor manual que você inseriu não é um número válido. Use o formato `4.50`.", ephemeral=True)
+                            return
                     else:
                         await interaction.followup.send("⚠️ O bot esqueceu os detalhes. Use `/aprovar` com os campos `produto` e `valor`.", ephemeral=True)
                         return
@@ -126,29 +139,45 @@ class Admin(commands.Cog):
         final_product_name = ticket_data.get("item_name", "N/A")
         final_price = ticket_data.get("final_price", 0.0)
         
+        new_transaction_id = None
         try:
             async with database.engine.connect() as conn:
-                await conn.execute(database.transactions.insert().values(user_id=membro.id, user_name=membro.name, channel_id=channel.id, product_name=final_product_name, price=final_price, gamepass_link=ticket_data.get("gamepass_link"), handler_admin_id=interaction.user.id, delivery_admin_id=ROBUX_DELIVERY_USER_ID, timestamp=datetime.utcnow(), closed_at=datetime.utcnow()))
+                result = await conn.execute(
+                    database.transactions.insert().values(
+                        user_id=membro.id, user_name=membro.name, channel_id=channel.id,
+                        product_name=final_product_name,
+                        price=final_price,
+                        gamepass_link=ticket_data.get("gamepass_link"),
+                        handler_admin_id=interaction.user.id,
+                        delivery_admin_id=ROBUX_DELIVERY_USER_ID,
+                        timestamp=datetime.utcnow(), closed_at=datetime.utcnow()
+                    ).returning(database.transactions.c.id)
+                )
+                new_transaction_id = result.scalar_one()
                 await conn.commit()
-            logging.info(f"Transação salva no banco de dados.")
+            logging.info(f"Transação ID {new_transaction_id} salva no banco de dados.")
         except Exception as e:
             logging.error(f"Falha ao salvar a transação no banco de dados: {e}")
-            await interaction.followup.send("⚠️ Erro ao salvar a transação no banco de dados.", ephemeral=True); return
+            await interaction.followup.send("⚠️ Ocorreu um erro ao salvar a transação no banco de dados.", ephemeral=True)
+            return
 
         log_channel = self.bot.get_channel(LOGS_COMPRAS_CHANNEL_ID)
         if log_channel:
             log_embed = discord.Embed(title="✅ Log de Compra", color=discord.Color.green(), timestamp=datetime.now(BR_TIMEZONE))
             log_embed.add_field(name="Cliente", value=f"{membro.mention} (`{membro.id}`)", inline=False)
             log_embed.add_field(name="Produto", value=final_product_name, inline=True)
-            
-            # --- NOSSA LINHA DE DEBUG ESTÁ AQUI ---
-            logging.info(f"DEBUG: Valor final antes de formatar: {final_price}, Tipo: {type(final_price)}")
-            
             log_embed.add_field(name="Valor", value=f"R$ {final_price:.2f}", inline=True)
             log_embed.add_field(name="Atendente", value=interaction.user.mention, inline=False)
-            if ticket_data.get('gamepass_link'): log_embed.add_field(name="Link da Gamepass", value=ticket_data['gamepass_link'], inline=False)
+            if ticket_data.get('gamepass_link'): log_embed.add_field(name="Link da Gamepass", value=ticket_data.get('gamepass_link'), inline=False)
             log_embed.set_thumbnail(url=membro.display_avatar.url)
             await log_channel.send(embed=log_embed)
+
+        try:
+            dm_embed = discord.Embed(title="❤️ Obrigado pela sua compra!", description=f"Olá {membro.name}! Sua compra de **{final_product_name}** foi concluída.\n\nAgradecemos a preferência! Clique abaixo para ver seu histórico.", color=ROSE_COLOR)
+            dm_embed.set_thumbnail(url=IMAGE_URL_FOR_EMBEDS)
+            await membro.send(embed=dm_embed, view=CustomerAreaView())
+        except Exception as e:
+            logging.warning(f"Não foi possível enviar a DM para {membro.name}: {e}")
 
         final_embed = discord.Embed(title="✅ Compra Finalizada!", description=f"Sua compra de **{final_product_name}** foi entregue! Este ticket foi arquivado.", color=discord.Color.green())
         await interaction.followup.send(embed=final_embed)
@@ -161,6 +190,13 @@ class Admin(commands.Cog):
             except Exception as e:
                 logging.error(f"Falha ao mover/arquivar o canal {channel.id}: {e}")
         
+        if new_transaction_id:
+            review_embed = discord.Embed(title="⭐ Avalie sua Compra!", description=f"Obrigado, {membro.mention}! Sua opinião é muito importante. Por favor, deixe uma nota e, se quiser, um comentário.", color=ROSE_COLOR)
+            try:
+                await channel.send(embed=review_embed, view=ReviewView(transaction_id=new_transaction_id))
+            except Exception as e:
+                logging.error(f"Não foi possível enviar o pedido de avaliação no canal {channel.id}: {e}")
+
         if channel.id in ONGOING_SALES_DATA:
             del ONGOING_SALES_DATA[channel.id]
             
