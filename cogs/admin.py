@@ -6,9 +6,10 @@ from discord import app_commands
 from datetime import datetime, timedelta
 import logging
 import asyncio
+import math # Adicionado para o cálculo da gamepass
 from config import *
 import database
-from cogs.cliente import CustomerAreaView # Importa a view da Área do Cliente para a DM
+from cogs.cliente import CustomerAreaView
 
 class Admin(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -56,6 +57,41 @@ class Admin(commands.Cog):
     @cleanup_loop.before_loop
     async def before_cleanup(self):
         await self.bot.wait_until_ready()
+
+    # --- NOVOS COMANDOS UTILITÁRIOS ---
+    @app_commands.command(name="pix", description="[Admin] Envia as informações de pagamento Pix no canal.")
+    @app_commands.guilds(discord.Object(id=GUILD_ID))
+    @app_commands.checks.has_role(ADMIN_ROLE_ID)
+    async def pix(self, interaction: discord.Interaction):
+        pix_embed = discord.Embed(title="Pagamento via PIX", description="Use o QR Code acima ou a chave PIX (E-mail) enviada abaixo para efetuar o pagamento.", color=ROSE_COLOR)
+        pix_embed.set_footer(text="Após pagar, por favor, envie o comprovante neste chat.")
+        pix_embed.set_image(url=QR_CODE_URL)
+        await interaction.response.send_message(embed=pix_embed)
+        await interaction.channel.send(PIX_KEY_MANUAL)
+
+    @app_commands.command(name="tutorialgamepass", description="[Admin] Envia o tutorial e o cálculo da Game Pass.")
+    @app_commands.guilds(discord.Object(id=GUILD_ID))
+    @app_commands.checks.has_role(ADMIN_ROLE_ID)
+    @app_commands.describe(robux="A quantidade de Robux que o cliente irá receber.")
+    async def tutorial_gamepass(self, interaction: discord.Interaction, robux: int):
+        if robux <= 0:
+            await interaction.response.send_message("A quantidade de Robux deve ser positiva.", ephemeral=True)
+            return
+        
+        gamepass_value = math.ceil(robux / 0.7)
+        embed = discord.Embed(
+            title="📄 Tutorial e Cálculo da Game Pass",
+            description=(
+                f"Para receber **{robux} Robux**, é preciso criar uma Game Pass no valor de **{gamepass_value} Robux**.\n\n"
+                f"Assista a este vídeo tutorial para aprender como fazer:\n{TUTORIAL_GAMEPASS_URL}\n\n"
+                "**Importante:** Ao criar, **NÃO** marque a opção de preços regionais."
+            ),
+            color=ROSE_COLOR
+        )
+        await interaction.response.send_message(embed=embed)
+
+
+    # --- COMANDOS EXISTENTES ---
 
     @app_commands.command(name="atender", description="[Admin] Libera o chat para o admin e renomeia o canal.")
     @app_commands.guilds(discord.Object(id=GUILD_ID))
@@ -111,7 +147,6 @@ class Admin(commands.Cog):
                     client_id = int(channel.topic.split("ID: ")[1].strip())
                     if produto and valor is not None:
                         try:
-                            # Converte o valor de texto para número, trocando vírgula por ponto
                             corrected_valor = float(valor.replace(',', '.'))
                             ticket_data = {'client_id': client_id, 'item_name': produto, 'final_price': corrected_valor}
                         except ValueError:
