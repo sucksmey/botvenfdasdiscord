@@ -8,8 +8,6 @@ import logging
 import asyncio
 from config import *
 import database
-from sqlalchemy import select
-from cogs.cliente import ReviewView, CustomerAreaView, StartReviewView # Importa a nova view que inicia a avaliação
 
 class Admin(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -37,25 +35,18 @@ class Admin(commands.Cog):
 
                 for ticket in old_tickets_to_delete:
                     channel_id = ticket.channel_id
-                    if not channel_id:
-                        continue
-                        
+                    if not channel_id: continue
                     channel = self.bot.get_channel(channel_id)
                     if channel:
                         try:
                             await channel.delete(reason="Limpeza automática de ticket antigo.")
-                            logging.info(f"Canal de ticket {channel_id} deletado com sucesso.")
-                            
                             if transcript_channel:
-                                await transcript_channel.send(f"🗑️ O ticket `entregue-{ticket.user_name}` (ID: {channel_id}) foi deletado automaticamente após {days_to_keep} dias.")
-                        except discord.errors.NotFound:
-                            logging.warning(f"Não foi possível deletar o canal {channel_id}, pois ele não foi encontrado.")
+                                await transcript_channel.send(f"🗑️ O ticket `entregue-{ticket.user_name}` (ID: {channel_id}) foi deletado automaticamente.")
                         except Exception as e:
                             logging.error(f"Erro ao deletar o canal {channel_id}: {e}")
                     
                     update_query = database.transactions.update().where(database.transactions.c.id == ticket.id).values(is_archived=True)
                     await conn.execute(update_query)
-
                 await conn.commit()
             logging.info("Tarefa de limpeza finalizada.")
         except Exception as e:
@@ -85,8 +76,8 @@ class Admin(commands.Cog):
                     ONGOING_SALES_DATA[channel.id]['handler_admin_id'] = admin_user.id
             except Exception as e:
                 logging.error(f"Falha ao atender o ticket {channel.id}: {e}")
-                if not interaction.response.is_done(): await interaction.response.send_message("Ocorreu um erro ao tentar atender este ticket.", ephemeral=True)
-                else: await interaction.followup.send("Ocorreu um erro ao tentar atender este ticket.", ephemeral=True)
+                if not interaction.response.is_done(): await interaction.response.send_message("Ocorreu um erro.", ephemeral=True)
+                else: await interaction.followup.send("Ocorreu um erro.", ephemeral=True)
 
         if channel.id in ONGOING_SALES_DATA:
             await perform_attend_logic(is_memory_ticket=True)
@@ -99,11 +90,10 @@ class Admin(commands.Cog):
                 ONGOING_SALES_DATA[channel.id] = {'client_id': client_id, 'status': 're-attended'}
                 await perform_attend_logic(is_memory_ticket=False)
             except (IndexError, TypeError, ValueError) as e:
-                logging.error(f"Falha ao recuperar ID do cliente do tópico do canal {channel.id}: {e}")
-                await interaction.followup.send("Não consegui recuperar as informações deste ticket pelo tópico do canal.", ephemeral=True)
+                logging.error(f"Falha ao recuperar ID do cliente do tópico: {e}")
+                await interaction.followup.send("Não consegui recuperar as informações deste ticket.", ephemeral=True)
             return
-
-        await interaction.response.send_message("Este comando só pode ser usado em um canal de ticket de venda ativo.", ephemeral=True)
+        await interaction.response.send_message("Este comando só pode ser usado em um ticket de venda ativo.", ephemeral=True)
 
     @app_commands.command(name="aprovar", description="[Admin] Aprova a compra e move o ticket para a categoria de entregues.")
     @app_commands.guilds(discord.Object(id=GUILD_ID))
@@ -111,7 +101,6 @@ class Admin(commands.Cog):
     @app_commands.describe(produto="[Opcional] Nome do produto, se o bot esqueceu.", valor="[Opcional] Valor da compra, se o bot esqueceu.")
     async def aprovar(self, interaction: discord.Interaction, produto: str = None, valor: float = None):
         await interaction.response.defer()
-        
         channel = interaction.channel
         ticket_data = ONGOING_SALES_DATA.get(channel.id)
         
@@ -121,48 +110,31 @@ class Admin(commands.Cog):
                     client_id = int(channel.topic.split("ID: ")[1].strip())
                     if produto and valor is not None:
                         ticket_data = {'client_id': client_id, 'item_name': produto, 'final_price': valor}
-                        await interaction.followup.send("✅ Ticket recuperado com os dados manuais.", ephemeral=True)
                     else:
-                        await interaction.followup.send("⚠️ O bot esqueceu os detalhes deste ticket. Por favor, use o comando `/aprovar` preenchendo os campos `produto` e `valor`.", ephemeral=True)
+                        await interaction.followup.send("⚠️ O bot esqueceu os detalhes. Use `/aprovar` com os campos `produto` e `valor`.", ephemeral=True)
                         return
                 except (IndexError, ValueError):
-                     await interaction.followup.send("❌ Não foi possível recuperar os dados do cliente deste ticket.", ephemeral=True)
-                     return
+                     await interaction.followup.send("❌ Não foi possível recuperar o cliente deste ticket.", ephemeral=True); return
             else:
-                await interaction.followup.send("❌ Não é um ticket válido ou as informações foram perdidas.", ephemeral=True)
-                return
+                await interaction.followup.send("❌ Não é um ticket válido.", ephemeral=True); return
         
         client_id = ticket_data.get("client_id")
         membro = interaction.guild.get_member(client_id)
-        
         if not membro:
-            await interaction.followup.send(f"Não foi possível encontrar o membro com ID {client_id}.", ephemeral=True)
-            return
+            await interaction.followup.send(f"Não foi possível encontrar o membro com ID {client_id}.", ephemeral=True); return
         
         final_product_name = ticket_data.get("item_name", "N/A")
         final_price = ticket_data.get("final_price", 0.0)
         
-        # Salva no DB
         try:
             async with database.engine.connect() as conn:
-                result = await conn.execute(
-                    database.transactions.insert().values(
-                        user_id=membro.id, user_name=membro.name, channel_id=channel.id,
-                        product_name=final_product_name, price=final_price,
-                        gamepass_link=ticket_data.get("gamepass_link"),
-                        handler_admin_id=interaction.user.id,
-                        delivery_admin_id=ROBUX_DELIVERY_USER_ID,
-                        timestamp=datetime.utcnow(), closed_at=datetime.utcnow()
-                    ).returning(database.transactions.c.id)
-                )
+                await conn.execute(database.transactions.insert().values(user_id=membro.id, user_name=membro.name, channel_id=channel.id, product_name=final_product_name, price=final_price, gamepass_link=ticket_data.get("gamepass_link"), handler_admin_id=interaction.user.id, delivery_admin_id=ROBUX_DELIVERY_USER_ID, timestamp=datetime.utcnow(), closed_at=datetime.utcnow()))
                 await conn.commit()
             logging.info(f"Transação salva no banco de dados.")
         except Exception as e:
             logging.error(f"Falha ao salvar a transação no banco de dados: {e}")
-            await interaction.followup.send("⚠️ Ocorreu um erro ao salvar a transação no banco de dados.", ephemeral=True)
-            return
+            await interaction.followup.send("⚠️ Erro ao salvar a transação no banco de dados.", ephemeral=True); return
 
-        # Envia log da compra
         log_channel = self.bot.get_channel(LOGS_COMPRAS_CHANNEL_ID)
         if log_channel:
             log_embed = discord.Embed(title="✅ Log de Compra", color=discord.Color.green(), timestamp=datetime.now(BR_TIMEZONE))
@@ -174,15 +146,6 @@ class Admin(commands.Cog):
             log_embed.set_thumbnail(url=membro.display_avatar.url)
             await log_channel.send(embed=log_embed)
 
-        # Envia DM para o cliente
-        try:
-            dm_embed = discord.Embed(title="❤️ Obrigado pela sua compra!", description=f"Olá {membro.name}! Sua compra de **{final_product_name}** foi concluída.\n\nAgradecemos a preferência! Clique abaixo para ver seu histórico.", color=ROSE_COLOR)
-            dm_embed.set_thumbnail(url=IMAGE_URL_FOR_EMBEDS)
-            await membro.send(embed=dm_embed, view=CustomerAreaView())
-        except Exception as e:
-            logging.warning(f"Não foi possível enviar a DM para {membro.name}: {e}")
-
-        # Envia mensagem final e arquiva o canal
         final_embed = discord.Embed(title="✅ Compra Finalizada!", description=f"Sua compra de **{final_product_name}** foi entregue! Este ticket foi arquivado.", color=discord.Color.green())
         await interaction.followup.send(embed=final_embed)
 
@@ -205,19 +168,18 @@ class Admin(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         vip_role = interaction.guild.get_role(VIP_ROLE_ID)
         if not vip_role:
-            await interaction.followup.send("Erro: O cargo VIP não foi encontrado no servidor.", ephemeral=True)
-            return
+            await interaction.followup.send("Erro: O cargo VIP não foi encontrado.", ephemeral=True); return
         try:
             await membro.add_roles(vip_role, reason=f"Compra de VIP aprovada por {interaction.user.name}")
             async with database.engine.connect() as conn:
                 await conn.execute(database.transactions.insert().values(user_id=membro.id, user_name=membro.name, channel_id=interaction.channel.id, product_name="Assinatura VIP", price=VIP_PRICE, handler_admin_id=interaction.user.id, timestamp=datetime.utcnow(), closed_at=datetime.utcnow()))
                 await conn.commit()
-            success_embed = discord.Embed(title="💎 VIP Ativado!", description=f"Parabéns {membro.mention}, você agora é um membro VIP! Obrigado pela sua compra.", color=discord.Color.gold())
+            success_embed = discord.Embed(title="💎 VIP Ativado!", description=f"Parabéns {membro.mention}, você agora é um membro VIP!", color=discord.Color.gold())
             await interaction.channel.send(embed=success_embed)
-            await interaction.followup.send("Assinatura VIP aprovada e registrada com sucesso!", ephemeral=True)
+            await interaction.followup.send("Assinatura VIP aprovada e registrada!", ephemeral=True)
         except Exception as e:
             logging.error(f"Erro ao aprovar VIP para {membro.name}: {e}")
-            await interaction.followup.send(f"Ocorreu um erro ao tentar aprovar o VIP: {e}", ephemeral=True)
+            await interaction.followup.send(f"Ocorreu um erro ao tentar aprovar o VIP.", ephemeral=True)
 
     @app_commands.command(name="fechar", description="[Admin] Força o fechamento e exclusão de um ticket.")
     @app_commands.guilds(discord.Object(id=GUILD_ID))
@@ -225,8 +187,7 @@ class Admin(commands.Cog):
     async def fechar(self, interaction: discord.Interaction):
         channel = interaction.channel
         if "ticket-" not in channel.name and "entregar-" not in channel.name and "atendido-" not in channel.name:
-            await interaction.response.send_message("Este comando só pode ser usado em um canal de ticket.", ephemeral=True)
-            return
+            await interaction.response.send_message("Este comando só pode ser usado em um canal de ticket.", ephemeral=True); return
         
         if channel.id in ONGOING_SALES_DATA:
             del ONGOING_SALES_DATA[channel.id]
