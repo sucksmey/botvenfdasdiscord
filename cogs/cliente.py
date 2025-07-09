@@ -108,10 +108,11 @@ class StartReviewView(discord.ui.View):
     def __init__(self, transaction_id: int):
         super().__init__(timeout=None)
         self.transaction_id = transaction_id
+        # Define um custom_id único para o botão para que o bot possa encontrá-lo
+        self.children[0].custom_id = f"start_review_button_{transaction_id}"
 
-    @discord.ui.button(label="⭐ Avaliar Atendimento", style=discord.ButtonStyle.primary, custom_id=f"start_review_button")
+    @discord.ui.button(label="⭐ Avaliar Atendimento", style=discord.ButtonStyle.primary)
     async def start_review_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Garante que apenas o cliente da transação possa avaliar
         async with database.engine.connect() as conn:
             query = select(database.transactions.c.user_id).where(database.transactions.c.id == self.transaction_id)
             result = await conn.execute(query)
@@ -123,7 +124,8 @@ class StartReviewView(discord.ui.View):
             
         await interaction.response.send_modal(ReviewModal(transaction_id=self.transaction_id))
 
-# --- ÁREA DO CLIENTE E VIP (sem alterações) ---
+
+# --- ÁREA DO CLIENTE E VIP ---
 
 async def show_purchase_history(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
@@ -200,7 +202,6 @@ class Cliente(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    # NOVO COMANDO /avaliacao
     @app_commands.command(name="avaliacao", description="[Admin] Envia o pedido de avaliação para o cliente neste ticket.")
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.checks.has_role(ADMIN_ROLE_ID)
@@ -210,7 +211,6 @@ class Cliente(commands.Cog):
             await interaction.response.send_message("Este comando só pode ser usado em um canal de ticket arquivado.", ephemeral=True)
             return
         
-        # Encontra a transação mais recente para este canal
         async with database.engine.connect() as conn:
             query = select(database.transactions.c.id).where(database.transactions.c.channel_id == channel.id).order_by(database.transactions.c.id.desc()).limit(1)
             result = await conn.execute(query)
@@ -225,11 +225,9 @@ class Cliente(commands.Cog):
             description=f"Sua opinião é muito importante para nós. Por favor, clique no botão abaixo para deixar uma nota e um comentário sobre sua experiência.",
             color=ROSE_COLOR
         )
-        # Passa o ID da transação para a View
         view = StartReviewView(transaction_id=transaction_id)
         
         await interaction.response.send_message(embed=review_embed, view=view)
-
 
     @app_commands.command(name="minhascompras", description="Mostra o seu histórico de compras na loja.")
     @app_commands.guilds(discord.Object(id=GUILD_ID))
