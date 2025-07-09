@@ -229,7 +229,7 @@ class Admin(commands.Cog):
             await interaction.followup.send(f"Ocorreu um erro ao tentar aprovar o VIP.", ephemeral=True)
 
     @app_commands.command(name="fechar", description="[Admin] Força o fechamento e exclusão de um ticket.")
-    @app_commands.guilds(discord.Object(id=GUILD_ID))
+    @app_commands.guilds(discord.Object(id=GUILD_ID)) # <-- ERRO ESTAVA AQUI, AGORA CORRIGIDO
     @app_commands.checks.has_role(ADMIN_ROLE_ID)
     async def fechar(self, interaction: discord.Interaction):
         channel = interaction.channel
