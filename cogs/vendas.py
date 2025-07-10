@@ -10,12 +10,17 @@ from datetime import datetime
 from config import *
 import database
 
-# --- NOVA VIEW PARA ESCOLHA DE PAGAMENTO ---
+# --- NOVA VIEW PARA ESCOLHA DE PAGAMENTO (COM A CORREÇÃO) ---
 class PaymentMethodView(discord.ui.View):
     def __init__(self, item_name: str, price: float):
-        super().__init__(timeout=300)
+        # ALTERAÇÃO: Adicionado timeout=None para que os botões nunca expirem
+        super().__init__(timeout=None)
         self.item_name = item_name
         self.price = price
+        # Adiciona um custom_id único para cada botão para o Discord lembrar deles
+        self.pix_button.custom_id = f"pix_button_{int(datetime.now().timestamp())}"
+        self.boleto_button.custom_id = f"boleto_button_{int(datetime.now().timestamp())}"
+        self.card_button.custom_id = f"card_button_{int(datetime.now().timestamp())}"
 
     async def handle_pix_payment(self, interaction: discord.Interaction):
         ticket_data = ONGOING_SALES_DATA.get(interaction.channel.id)
@@ -25,10 +30,10 @@ class PaymentMethodView(discord.ui.View):
 
         ticket_data.update({"status": "awaiting_payment", "final_price": self.price, "item_name": self.item_name, "payment_method": "PIX"})
         
-        pix_embed = discord.Embed(title="Pagamento via PIX", description="Use o QR Code acima ou a chave **Copia e Cola** enviada abaixo.", color=ROSE_COLOR).set_footer(text="Após pagar, por favor, envie o comprovante neste chat.").set_image(url=QR_CODE_URL)
+        pix_embed = discord.Embed(title="Pagamento via PIX", description="Use o QR Code acima ou a chave PIX (E-mail) enviada abaixo.", color=ROSE_COLOR).set_footer(text="Após pagar, por favor, envie o comprovante neste chat.").set_image(url=QR_CODE_URL)
         
         await interaction.response.send_message(embed=pix_embed)
-        await interaction.channel.send(f"`{PIX_KEY_MANUAL}`")
+        await interaction.channel.send(PIX_KEY_MANUAL)
 
     async def handle_manual_payment(self, interaction: discord.Interaction, method: str):
         ticket_data = ONGOING_SALES_DATA.get(interaction.channel.id)
@@ -61,7 +66,7 @@ class PaymentMethodView(discord.ui.View):
         await self.handle_manual_payment(interaction, "Cartão de Crédito")
 
 
-# --- O RESTO DO CÓDIGO ---
+# --- O RESTO DO CÓDIGO (sem alterações) ---
 
 async def proceed_with_sale(channel: discord.TextChannel, user: discord.Member, selected_product: str):
     product_info = PRODUCTS_DATA[selected_product]
@@ -94,7 +99,6 @@ async def proceed_with_sale(channel: discord.TextChannel, user: discord.Member, 
         embed.description = ("Para este item, um de nossos atendentes irá te ajudar em breve para fazer o orçamento.")
         status = "awaiting_human"
     
-    # Adiciona as formas de pagamento ao embed
     embed.add_field(
         name="Formas de Pagamento Disponíveis",
         value="> **Pix:** Aprovação Imediata (após envio do comprovante)\n"
@@ -109,9 +113,10 @@ async def proceed_with_sale(channel: discord.TextChannel, user: discord.Member, 
 
 class TermsConfirmationView(discord.ui.View):
     def __init__(self, selected_product: str):
-        super().__init__(timeout=300)
+        super().__init__(timeout=None)
         self.selected_product = selected_product
-        self.add_item(discord.ui.Button(label="Ler Termos de Serviço", style=discord.ButtonStyle.link, url=TERMS_URL))
+        self.add_item(discord.ui.Button(label="Ler Termos de Serviço", style=discord.ButtonStyle.link, url=TERMS_URL, row=1))
+        self.children[0].custom_id = "terms_confirm_button_main"
 
     @discord.ui.button(label="Concordo e quero prosseguir", style=discord.ButtonStyle.success, custom_id="terms_confirm_button")
     async def confirm_terms(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -123,7 +128,9 @@ class TermsConfirmationView(discord.ui.View):
 
 class RegionalPriceConfirmationView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=300)
+        super().__init__(timeout=None)
+        self.children[0].custom_id = f"regional_price_yes_{int(datetime.now().timestamp())}"
+        self.children[1].custom_id = f"regional_price_no_{int(datetime.now().timestamp())}"
 
     async def proceed_to_delivery(self, interaction: discord.Interaction):
         ticket_data = ONGOING_SALES_DATA.get(interaction.channel.id)
@@ -138,13 +145,13 @@ class RegionalPriceConfirmationView(discord.ui.View):
         except Exception as e:
             logging.error(f"Não foi possível renomear o canal {interaction.channel.id}: {e}")
 
-    @discord.ui.button(label="SIM, desativei", style=discord.ButtonStyle.success, custom_id="regional_price_yes")
+    @discord.ui.button(label="SIM, desativei", style=discord.ButtonStyle.success)
     async def confirm_yes(self, interaction: discord.Interaction, button: discord.ui.Button):
         for item in self.children: item.disabled = True
         await interaction.message.edit(view=self)
         await self.proceed_to_delivery(interaction)
         
-    @discord.ui.button(label="NÃO, vou desativar", style=discord.ButtonStyle.danger, custom_id="regional_price_no")
+    @discord.ui.button(label="NÃO, vou desativar", style=discord.ButtonStyle.danger)
     async def confirm_no(self, interaction: discord.Interaction, button: discord.ui.Button):
         for item in self.children: item.disabled = True
         await interaction.message.edit(view=self)
@@ -290,7 +297,7 @@ class Vendas(commands.Cog):
         if not ticket_data: return
 
         status = ticket_data.get("status")
-        if status == 'being_attended_by_human': return
+        if status == 'being_attended_by_human' or status == 'awaiting_human_payment': return
 
         if status == "awaiting_gamepass_link" and ("roblox.com/game-pass/" in message.content or "ro.blox.com/Ebh5" in message.content):
             ticket_data['gamepass_link'] = message.content
@@ -304,6 +311,11 @@ class Vendas(commands.Cog):
             class MockInteraction:
                 def __init__(self, channel, client, guild): self.channel, self.client, self.guild = channel, client, guild
             await RegionalPriceConfirmationView().proceed_to_delivery(MockInteraction(message.channel, self.bot, message.guild))
+            return
+
+        if status == "awaiting_vip_payment" and message.attachments:
+            await message.channel.send(f"Obrigado, {message.author.mention}! Seu comprovante para a compra do VIP foi recebido. Um <@&{ADMIN_ROLE_ID}> irá verificar e aprovar em breve.")
+            ticket_data['status'] = 'awaiting_vip_approval'
             return
 
         if status == "awaiting_payment" and message.attachments:
@@ -335,8 +347,9 @@ class Vendas(commands.Cog):
             item_name = None
 
             if status == "awaiting_robux_choice":
+                user_input = message.content.strip()
                 try:
-                    amount = int(re.sub(r'[^0-G]', '', message.content.strip()))
+                    amount = int(re.sub(r'[^0-9]', '', user_input))
                     if amount <= 0: raise ValueError()
                     price = calculate_robux_price(amount, is_vip)
                     item_name = f"{amount} Robux"
