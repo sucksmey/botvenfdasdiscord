@@ -49,7 +49,16 @@ PRODUCTS_DATA = {
     "League of Legends": {"emoji": "💥", "prices": {"485 RP": 19.00, "575 RP": 21.90, "610 RP": 23.00, "1020 RP": 35.00, "1380 RP": 44.90, "1650 RP": 53.00, "1865 RP": 60.90, "2125 RP": 67.00, "2260 RP": 73.00, "2670 RP": 85.00, "2800 RP": 86.90, "3355 RP": 103.00, "3805 RP": 116.00, "4500 RP": 135.90, "5005 RP": 153.00, "5445 RP": 163.00, "5795 RP": 173.00, "6710 RP": 192.90, "6710 RP": 203.00, "11240 RP": 323.00, "13500 RP": 382.90}},
     "Free Fire": {"emoji": "🔥", "prices": {"100 Diamantes + 10%": 6.49, "310 Diamantes + 10%": 15.99, "520 Diamantes + 10%": 22.99}},
     "Mobile Legends": {"emoji": "⭐", "prices": {"Pase de Super Valor": 5.00, "78 Diamantes + 8 Bonus": 7.25, "Pase Semanal": 9.00, "154 Diamantes + 16 Bonus": 15.99}},
-    "PlayStation Store": {"emoji": "🎮", "prices": {"R$35": 37.00, "R$60": 62.00, "R$100": 102.00, "R$250": 252.00, "R$300": 302.00}}
+    "PlayStation Store": {"emoji": "🎮", "prices": {"R$35": 37.00, "R$60": 62.00, "R$100": 102.00, "R$250": 252.00, "R$300": 302.00}},
+    "Xbox Store": {"emoji": "🛒", "prices": {"R$50": 52.00, "R$100": 102.00, "R$150": 152.00, "R$200": 202.00}},
+    "Genshin Impact": {"emoji": "🌈", "prices": {"60 Cristal Gênesis": 8.03, "330 Cristal Gênesis": 28.72, "Bênção da Lua Nova": 28.72}},
+    "Honkai Star Rail": {"emoji": "✨", "prices": {"60 Fragmentos Oníricos": 6.90, "330 Fragmentos Oníricos": 26.90}},
+    "Honor of Kings": {"emoji": "👑", "prices": {"88 Fichas": 7.69, "257 Fichas": 19.19}},
+    "Marvel Rivals": {"emoji": "🦸", "prices": {"100 TRELIÇAS": 5.90, "500 TRELIÇAS": 25.50}},
+    "Google Play": {"emoji": "📱", "prices": {"R$30": 31.00, "R$50": 51.00, "R$100": 101.00}},
+    "Xbox Fortnite": {"emoji": "🕹️", "prices": {"Pacote Lendas Menta (Xbox)": 100.00}},
+    "Apple": {"emoji": "🍎", "prices": {"R$20": 22.00, "R$50": 52.00}},
+    "Elojob VALORANT": {"emoji": "⬆️", "prices": {}},
 }
 
 ONGOING_SALES_DATA = {}
