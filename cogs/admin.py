@@ -20,10 +20,8 @@ class Admin(commands.Cog):
     async def handle_error(self, interaction: discord.Interaction, error: Exception):
         """Função centralizada para lidar com erros e reportá-los."""
         print(f"Ocorreu um erro no comando '{interaction.command.name}':")
-        traceback.print_exc() # Imprime o erro completo no log para depuração
-        
-        # Tenta enviar o erro de volta para o usuário
-        error_message = f"😕 Ocorreu um erro inesperado ao executar o comando.\n\n**Detalhe:** `{str(error)}`"
+        traceback.print_exc()
+        error_message = f"😕 Ocorreu um erro inesperado.\n**Detalhe:** `{str(error)}`"
         if interaction.response.is_done():
             await interaction.followup.send(error_message, ephemeral=True)
         else:
@@ -33,24 +31,16 @@ class Admin(commands.Cog):
     @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
     async def setup_vendas(self, interaction: discord.Interaction):
         try:
-            # Defer torna a resposta pública, já que o painel será a resposta.
             await interaction.response.defer()
-
-            # Cria o Embed com o estilo desejado
             embed = discord.Embed(
                 title="✨ Bem-vindo(a) à Israbuy!",
                 description="Pronto para a melhor experiência de compra?\n\nSelecione um jogo ou serviço no menu abaixo para abrir um ticket ou clique no botão para ver todos os preços.",
-                color=0xFF69B4  # Cor Rosa
+                color=0xFF69B4
             )
             view = SalesPanelView(self.bot)
-            
-            # Envia o painel como a resposta final do comando.
-            # Esta é a forma mais confiável.
             await interaction.followup.send(embed=embed, view=view)
-
         except Exception as e:
             await self.handle_error(interaction, e)
-
 
     @app_commands.command(name="setupvip", description="Posta o painel de compra de VIP.")
     @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
@@ -69,7 +59,6 @@ class Admin(commands.Cog):
         except Exception as e:
             await self.handle_error(interaction, e)
 
-
     @app_commands.command(name="setuppainelcliente", description="Posta o painel da área do cliente.")
     @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
     async def setup_painel_cliente(self, interaction: discord.Interaction):
@@ -84,24 +73,99 @@ class Admin(commands.Cog):
         except Exception as e:
             await self.handle_error(interaction, e)
 
-
     desconto_group = app_commands.Group(name="desconto", description="Gerencia o desconto global.", guild_ids=[config.GUILD_ID])
 
-    @desconto_group.command(name="aplicar", description="Aplica um desconto global (APENAS PARA ROBUX).")
-    @app_commands.describe(porcentagem="Valor do desconto (ex: 10 para 10%).")
+    @desconto_group.command(name="aplicar", description="Aplica um desconto (padrão: 1ª compra de Robux).")
+    @app_commands.describe(porcentagem="Valor do desconto (ex: 10).", para_todos="Liberar para todos (Sim/Não)?")
     @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
-    async def aplicar_desconto(self, interaction: discord.Interaction, porcentagem: float):
-        async with self.bot.pool.acquire() as conn:
-            await conn.execute("DELETE FROM discount WHERE id = 1;")
-            await conn.execute("INSERT INTO discount (id, percentage) VALUES (1, $1);", porcentagem)
-        await interaction.response.send_message(f"✅ Desconto de **{porcentagem}%** aplicado com sucesso para a categoria ROBUX!", ephemeral=True)
+    async def aplicar_desconto(self, interaction: discord.Interaction, porcentagem: float, para_todos: bool = False):
+        try:
+            async with self.bot.pool.acquire() as conn:
+                await conn.execute("DELETE FROM discount WHERE id = 1;")
+                await conn.execute(
+                    "INSERT INTO discount (id, percentage, apply_to_all) VALUES (1, $1, $2);",
+                    porcentagem, para_todos
+                )
+            msg = f"✅ Desconto de **{porcentagem}%** aplicado para ROBUX."
+            if para_todos:
+                msg += " **Liberado para todos os membros!**"
+            else:
+                msg += " **Válido apenas para a primeira compra de não-clientes.**"
+            await interaction.response.send_message(msg, ephemeral=True)
+        except Exception as e:
+            await self.handle_error(interaction, e)
 
     @desconto_group.command(name="remover", description="Remove o desconto global de Robux.")
     @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
     async def remover_desconto(self, interaction: discord.Interaction):
-        async with self.bot.pool.acquire() as conn:
-            await conn.execute("DELETE FROM discount WHERE id = 1;")
-        await interaction.response.send_message("🗑️ Desconto de Robux removido. Os preços voltaram ao normal.", ephemeral=True)
+        try:
+            async with self.bot.pool.acquire() as conn:
+                await conn.execute("DELETE FROM discount WHERE id = 1;")
+            await interaction.response.send_message("🗑️ Desconto de Robux removido. Os preços voltaram ao normal.", ephemeral=True)
+        except Exception as e:
+            await self.handle_error(interaction, e)
+
+    @app_commands.command(name="aprovar", description="[Admin] Aprova a compra, registra e move o ticket.")
+    @app_commands.describe(gamepass_link="O link ou ID da Game Pass do cliente.")
+    @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
+    async def aprovar(self, interaction: discord.Interaction, gamepass_link: str):
+        try:
+            await interaction.response.defer(ephemeral=True)
+            channel = interaction.channel
+            tickets_cog = self.bot.get_cog("Tickets")
+            if not tickets_cog:
+                return await interaction.followup.send("Erro: A cog de tickets não foi encontrada.", ephemeral=True)
+
+            ticket_info = tickets_cog.ticket_data.get(channel.id, {})
+            
+            try:
+                name_parts = channel.name.split('-')
+                user_id = int(name_parts[-1])
+                customer = await self.bot.fetch_user(user_id)
+            except (ValueError, IndexError):
+                return await interaction.followup.send("Não consegui identificar o cliente pelo nome do canal.", ephemeral=True)
+
+            product_name = ticket_info.get('product', 'N/A')
+            product_price = ticket_info.get('price', 0.0)
+            atendente_id = ticket_info.get('admin_id', interaction.user.id)
+            atendente = await self.bot.fetch_user(atendente_id)
+            
+            purchase_id = ticket_info.get('purchase_id')
+            if not purchase_id:
+                return await interaction.followup.send("Erro: ID da compra não encontrado no ticket. O fluxo pode ter sido interrompido.", ephemeral=True)
+
+            async with self.bot.pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE purchases SET admin_id = $1, gamepass_link = $2 WHERE id = $3",
+                    atendente.id, gamepass_link, purchase_id
+                )
+
+            guild = interaction.guild
+            entregues_category = guild.get_channel(config.CATEGORY_ENTREGUES_ID)
+            log_channel = guild.get_channel(config.LOGS_COMPRAS_CHANNEL_ID)
+
+            log_embed = discord.Embed(title="✅ Log de Compra", color=discord.Color.green(), timestamp=discord.utils.utcnow())
+            log_embed.set_thumbnail(url=customer.display_avatar.url)
+            log_embed.add_field(name="Cliente", value=f"{customer.mention} ({customer.id})", inline=False)
+            log_embed.add_field(name="Produto", value=product_name, inline=True)
+            log_embed.add_field(name="Valor", value=f"R$ {product_price:.2f}", inline=True)
+            log_embed.add_field(name="Atendente", value=atendente.mention, inline=False)
+            log_embed.add_field(name="Entregador", value=f"<@{config.ROBUX_DELIVERY_USER_ID}>", inline=False)
+            log_embed.add_field(name="Link da Gamepass", value=gamepass_link, inline=False)
+
+            if log_channel:
+                await log_channel.send(embed=log_embed)
+
+            await channel.send(f"Sua compra foi aprovada! O entregador <@{config.ROBUX_DELIVERY_USER_ID}> já foi notificado. Obrigado por comprar conosco!")
+            
+            if entregues_category:
+                await channel.edit(category=entregues_category, name=f"entregue-{customer.name}")
+
+            await interaction.followup.send("Compra aprovada com sucesso!", ephemeral=True)
+            if channel.id in tickets_cog.ticket_data:
+                del tickets_cog.ticket_data[channel.id]
+        except Exception as e:
+            await self.handle_error(interaction, e)
 
     @app_commands.command(name="fechar", description="[Admin] Deleta o ticket atual permanentemente.")
     @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
@@ -130,9 +194,7 @@ class Admin(commands.Cog):
                 try:
                     messages = [f"[{msg.created_at.strftime('%Y-%m-%d %H:%M')}] {msg.author.name}: {msg.content}" async for msg in channel.history(limit=200, oldest_first=True)]
                     transcript_content = "\n".join(messages) or "Nenhuma mensagem no ticket."
-                    
                     file = discord.File(io.BytesIO(transcript_content.encode('utf-8')), filename=f"transcript-{channel.name}.txt")
-
                     await transcript_channel.send(f"Transcript do ticket `{channel.name}` deletado por inatividade.", file=file)
                     await channel.delete(reason="Limpeza automática de ticket antigo.")
                 except Exception as e:
