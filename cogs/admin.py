@@ -19,22 +19,29 @@ class Admin(commands.Cog):
     @app_commands.command(name="setupvendas", description="Posta o painel de vendas no canal.")
     @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
     async def setup_vendas(self, interaction: discord.Interaction):
-        # Responde primeiro para evitar o timeout
-        await interaction.response.send_message("Criando painel de vendas...", ephemeral=True)
+        # ABORDAGEM MAIS SEGURA:
+        # 1. Responda de forma EFÊMERA e IMEDIATA para não dar timeout.
+        await interaction.response.defer(ephemeral=True)
 
+        # 2. Crie o Embed e a View.
         embed = discord.Embed(
             title="🛒 | Central de Vendas - Israbuy",
             description="Bem-vindo à nossa loja! Selecione uma categoria abaixo para ver os produtos disponíveis ou clique no botão para ver a tabela completa.",
             color=discord.Color.blue()
         )
+        view = SalesPanelView(self.bot)
         
-        # Envia o painel no canal como uma nova mensagem
-        await interaction.channel.send(embed=embed, view=SalesPanelView(self.bot))
+        # 3. Envie a mensagem principal para o canal usando o interaction.channel.
+        await interaction.channel.send(embed=embed, view=view)
+
+        # 4. Envie uma confirmação final na resposta efêmera.
+        await interaction.followup.send("Painel de vendas criado com sucesso!")
+
 
     @app_commands.command(name="setupvip", description="Posta o painel de compra de VIP.")
     @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
     async def setup_vip(self, interaction: discord.Interaction):
-        await interaction.response.send_message("Criando painel VIP...", ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
         embed = discord.Embed(
             title="⭐ | Torne-se VIP!",
             description=(
@@ -44,17 +51,21 @@ class Admin(commands.Cog):
             color=discord.Color.gold()
         )
         await interaction.channel.send(embed=embed, view=VIPPanelView(self.bot))
+        await interaction.followup.send("Painel VIP criado com sucesso!")
+
 
     @app_commands.command(name="setuppainelcliente", description="Posta o painel da área do cliente.")
     @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
     async def setup_painel_cliente(self, interaction: discord.Interaction):
-        await interaction.response.send_message("Criando painel do cliente...", ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
         embed = discord.Embed(
             title="👤 | Área do Cliente",
             description="Clique no botão abaixo para consultar seu histórico de compras.",
             color=discord.Color.green()
         )
         await interaction.channel.send(embed=embed, view=ClientPanelView(self.bot))
+        await interaction.followup.send("Painel do cliente criado com sucesso!")
+
 
     desconto_group = app_commands.Group(name="desconto", description="Gerencia o desconto global.", guild_ids=[config.GUILD_ID])
 
