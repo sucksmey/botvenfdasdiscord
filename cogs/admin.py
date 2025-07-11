@@ -104,6 +104,7 @@ class Admin(commands.Cog):
         except Exception as e:
             await self.handle_error(interaction, e)
 
+    # --- COMANDO /aprovar ATUALIZADO ---
     @app_commands.command(name="aprovar", description="[Admin] Aprova a compra, registra e move o ticket.")
     @app_commands.describe(
         gamepass_link="O link ou ID da Game Pass do cliente.",
@@ -139,11 +140,22 @@ class Admin(commands.Cog):
             atendente_id = ticket_info.get('admin_id', interaction.user.id)
             atendente = await self.bot.fetch_user(atendente_id)
             
-            purchase_id = ticket_info.get('purchase_id')
-            if not purchase_id:
-                return await interaction.followup.send("Erro: ID da compra não encontrado no ticket.", ephemeral=True)
-
+            # --- LÓGICA ATUALIZADA ---
+            # Busca o último registro de compra do cliente no banco de dados
             async with self.bot.pool.acquire() as conn:
+                purchase_record = await conn.fetchrow(
+                    "SELECT id, product_name, product_price FROM purchases WHERE user_id = $1 ORDER BY id DESC LIMIT 1",
+                    customer.id
+                )
+                if not purchase_record:
+                    return await interaction.followup.send("Nenhum registro de compra encontrado para este cliente no banco de dados.", ephemeral=True)
+                
+                # Usa os dados do banco de dados se a memória falhar
+                purchase_id = purchase_record['id']
+                if product_name == 'N/A': product_name = purchase_record['product_name']
+                if product_price == 0.0: product_price = purchase_record['product_price']
+
+                # Atualiza o registro com os dados do admin e da gamepass
                 await conn.execute(
                     "UPDATE purchases SET admin_id = $1, gamepass_link = $2 WHERE id = $3",
                     atendente.id, gamepass_link, purchase_id
