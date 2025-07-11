@@ -1,6 +1,6 @@
 # cogs/views.py
 import discord
-from discord.ext import commands  # <--- LINHA ADICIONADA PARA CORRIGIR O ERRO
+from discord.ext import commands
 import config
 import traceback
 import re
@@ -9,21 +9,72 @@ from datetime import timedelta
 
 # --- Modals ---
 class ReviewModal(discord.ui.Modal, title="Avalie nosso Atendimento"):
-    def __init__(self, bot):
+    def __init__(self, bot, customer_id, admin_id):
         super().__init__()
         self.bot = bot
-    rating = discord.ui.TextInput(label="Nota (de 1 a 10)", placeholder="Ex: 10", min_length=1, max_length=2, required=True)
-    comment = discord.ui.TextInput(label="Comentário (opcional)", style=discord.TextStyle.long, placeholder="Deixe seu feedback...", required=False)
+        self.customer_id = customer_id
+        self.admin_id = admin_id
+
+    nota = discord.ui.TextInput(
+        label="Nota (de 1 a 10)",
+        placeholder="Sua nota sincera sobre o atendimento e entrega.",
+        min_length=1,
+        max_length=2,
+        required=True
+    )
+    
+    descricao = discord.ui.TextInput(
+        label="Descrição da Avaliação (Opcional)",
+        style=discord.TextStyle.long,
+        placeholder="Gostou? Não gostou? Deixe seu comentário aqui!",
+        required=False
+    )
 
     async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
         review_channel = self.bot.get_channel(config.REVIEW_CHANNEL_ID)
-        embed = discord.Embed(title="⭐ Nova Avaliação Recebida!", color=discord.Color.gold(), timestamp=discord.utils.utcnow())
-        embed.set_author(name=interaction.user, icon_url=interaction.user.avatar.url)
-        embed.add_field(name="Nota", value=self.rating.value, inline=True)
-        embed.add_field(name="Comentário", value=self.comment.value or "Nenhum comentário.", inline=False)
-        if review_channel:
-            await review_channel.send(embed=embed)
-        await interaction.response.send_message("Obrigado pela sua avaliação!", ephemeral=True)
+        if not review_channel:
+            return await interaction.followup.send("Canal de avaliações não configurado.", ephemeral=True)
+
+        try:
+            nota_int = int(self.nota.value)
+            if not 0 <= nota_int <= 10: raise ValueError()
+        except ValueError:
+            return await interaction.followup.send("Por favor, insira uma nota válida de 0 a 10.", ephemeral=True)
+
+        customer = await self.bot.fetch_user(self.customer_id)
+        admin = await self.bot.fetch_user(self.admin_id) if self.admin_id else "N/A"
+        
+        embed = discord.Embed(
+            title="⭐ Nova Avaliação de Cliente!",
+            description=f"**Nota:** {self.nota.value}/10\n\n**Comentário:**\n>>> {self.descricao.value or 'Nenhum comentário.'}",
+            color=discord.Color.gold(),
+            timestamp=discord.utils.utcnow()
+        )
+        embed.set_author(name=f"Avaliação de {customer.display_name}", icon_url=customer.display_avatar.url)
+        embed.add_field(name="Cliente", value=customer.mention, inline=True)
+        embed.add_field(name="Atendente", value=admin.mention if isinstance(admin, discord.User) else admin, inline=True)
+        embed.add_field(name="Entregador", value=f"<@{config.ROBUX_DELIVERY_USER_ID}>", inline=True)
+        
+        await review_channel.send(embed=embed)
+        await interaction.followup.send("✅ Sua avaliação foi enviada com sucesso! Muito obrigado!", ephemeral=True)
+
+
+class ReviewView(discord.ui.View):
+    def __init__(self, bot, purchase_id, customer_id, admin_id):
+        super().__init__(timeout=None)
+        self.bot = bot
+        self.purchase_id = purchase_id
+        self.customer_id = customer_id
+        self.admin_id = admin_id
+
+    @discord.ui.button(label="⭐ Avaliar Compra", style=discord.ButtonStyle.success, custom_id="review_purchase")
+    async def review_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.customer_id:
+            return await interaction.response.send_message("Apenas o cliente que fez a compra pode deixar uma avaliação.", ephemeral=True)
+        
+        modal = ReviewModal(self.bot, self.customer_id, self.admin_id)
+        await interaction.response.send_modal(modal)
 
 # --- Novas Views para o Fluxo de Gamepass ---
 class RegionalPricingCheckView(discord.ui.View):
