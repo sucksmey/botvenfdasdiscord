@@ -19,14 +19,16 @@ class Database(commands.Cog):
                         product_name TEXT NOT NULL,
                         product_price NUMERIC(10, 2) NOT NULL,
                         purchase_date TIMESTAMPTZ DEFAULT current_timestamp,
-                        is_vip_purchase BOOLEAN DEFAULT FALSE
+                        is_vip_purchase BOOLEAN DEFAULT FALSE,
+                        gamepass_link TEXT
                     );
                 ''')
                 # Tabela para desconto global
                 await conn.execute('''
                     CREATE TABLE IF NOT EXISTS discount (
                         id INT PRIMARY KEY,
-                        percentage NUMERIC(5, 2) NOT NULL
+                        percentage NUMERIC(5, 2) NOT NULL,
+                        apply_to_all BOOLEAN DEFAULT FALSE
                     );
                 ''')
             print("Tabelas do banco de dados verificadas/criadas.")
