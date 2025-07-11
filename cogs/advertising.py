@@ -4,15 +4,15 @@ from discord import app_commands
 from discord.ext import commands, tasks
 import config
 import traceback
+import random
 
-# --- Textos das Propagandas ---
-# Você pode editar, adicionar ou remover mensagens diretamente aqui.
+# --- Textos das Propagandas (com a primeira mensagem ATUALIZADA) ---
 AD_MESSAGES = [
     {
-        "content": "É sua primeira compra na Israbuy? <:PandaDuck:1240881902096224326>",
+        "content": "🎉 Sua primeira compra na **ISRABUY** tem presente!",
         "embed": discord.Embed(
-            description="## 🛒 Use o cupom **PRIMEIRACOMPRA03** para obter 3% de desconto na sua primeira compra!\n\n```O cupom é válido somente para ROBUX, os outros jogos não participa da promoção```",
-            color=0x2ECC71
+            description="## Você ganha **3% de DESCONTO** na sua primeira compra de Robux! 💎\n\nBasta iniciar um ticket de compra que o desconto será aplicado **automaticamente** no seu pedido.",
+            color=0xFF69B4  # Cor Rosinha
         )
     },
     {
@@ -25,7 +25,7 @@ AD_MESSAGES = [
     {
         "content": "",
         "embed": discord.Embed(
-            title="Dimas no Free Fire tá baratinho em!",
+            title="💎 Dimas no Free Fire tá baratinho em!",
             description="Perde essa oportunidade não!",
             color=0xF1C40F
         )
@@ -33,7 +33,7 @@ AD_MESSAGES = [
     {
         "content": "",
         "embed": discord.Embed(
-            title="Valorant Points e Riot Points baratinhos!",
+            title="💥 Valorant Points e Riot Points baratinhos!",
             description="Pra te deixar com skin poderosa!",
             color=0x3498DB
         )
@@ -41,7 +41,7 @@ AD_MESSAGES = [
     {
         "content": "",
         "embed": discord.Embed(
-            title="Genshin Impact é pay-to-win demais!",
+            title="🌈 Genshin Impact é pay-to-win demais!",
             description="Aqui na Israbuy os preços são bem baratinhos pra te ajudar nessa jornada.",
             color=0x9B59B6
         )
