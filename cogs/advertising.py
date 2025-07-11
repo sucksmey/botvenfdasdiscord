@@ -6,7 +6,7 @@ import config
 import traceback
 import random
 
-# --- Textos das Propagandas ---
+# --- Textos das Propagandas (com emojis padrão) ---
 AD_MESSAGES = [
     {
         "content": "🎉 Sua primeira compra na **ISRABUY** tem presente!",
@@ -16,7 +16,7 @@ AD_MESSAGES = [
         )
     },
     {
-        "content": "Cansou de estar afundado no Bronze ou no Prata no Valorant? Nós subimos você! <:PandaDevil:1240881900405624832>",
+        "content": "Cansou de estar afundado no Bronze ou no Prata no Valorant? Nós subimos você! 😈",
         "embed": discord.Embed(
             description="## Fazemos elojob de Valorant!\n\nConfira nossos preços clicando em \"escolha um jogo ou serviço para comprar...\"",
             color=0xE91E63
@@ -26,7 +26,7 @@ AD_MESSAGES = [
         "content": "",
         "embed": discord.Embed(
             title="💎 Dimas no Free Fire tá baratinho em!",
-            description="Perde essa oportunidade não!",
+            description="Perde essa oportunidade não! 🔥",
             color=0xF1C40F
         )
     },
@@ -34,7 +34,7 @@ AD_MESSAGES = [
         "content": "",
         "embed": discord.Embed(
             title="💥 Valorant Points e Riot Points baratinhos!",
-            description="Pra te deixar com skin poderosa!",
+            description="Pra te deixar com skin poderosa! ✨",
             color=0x3498DB
         )
     },
@@ -42,7 +42,7 @@ AD_MESSAGES = [
         "content": "",
         "embed": discord.Embed(
             title="🌈 Genshin Impact é pay-to-win demais!",
-            description="Aqui na Israbuy os preços são bem baratinhos pra te ajudar nessa jornada.",
+            description="Aqui na Israbuy os preços são bem baratinhos pra te ajudar nessa jornada. 😉",
             color=0x9B59B6
         )
     }
@@ -108,7 +108,6 @@ class Advertising(commands.Cog):
         except Exception as e:
             await self.handle_error(interaction, e)
 
-    # --- ATUALIZAÇÃO DO TEMPO ---
     @tasks.loop(minutes=2)
     async def update_ad_message(self):
         try:
