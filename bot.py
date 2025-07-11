@@ -6,8 +6,6 @@ from discord.ext import commands
 from dotenv import load_dotenv
 import asyncpg
 import config
-
-# Importa as views que precisam ser persistentes
 from cogs.views import SalesPanelView, VIPPanelView, ClientPanelView, TutorialGamepassView
 
 load_dotenv()
@@ -24,11 +22,10 @@ class IsrabuyBot(commands.Bot):
         self.pool = None
 
     async def setup_hook(self):
-        # Adiciona as Views persistentes ANTES de conectar
         self.add_view(SalesPanelView(self))
         self.add_view(VIPPanelView(self))
         self.add_view(ClientPanelView(self))
-        self.add_view(TutorialGamepassView()) # Esta não precisa do bot, então não passamos
+        self.add_view(TutorialGamepassView())
 
         try:
             self.pool = await asyncpg.create_pool(DATABASE_URL)
@@ -42,12 +39,10 @@ class IsrabuyBot(commands.Bot):
             'cogs.admin',
             'cogs.tickets',
             'cogs.helpers',
-            # As cogs de views e advertising podem ser carregadas se necessário
-            # 'cogs.views', 
-            # 'cogs.advertising' 
+            'cogs.views', 
+            'cogs.advertising' # <-- ADICIONA A NOVA COG
         ]
         
-        # Carregamos as cogs que contêm comandos e listeners
         for extension in initial_extensions:
             try:
                 await self.load_extension(extension)
