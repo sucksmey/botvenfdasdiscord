@@ -1,5 +1,6 @@
 # cogs/views.py
 import discord
+from discord.ext import commands  # <--- LINHA ADICIONADA PARA CORRIGIR O ERRO
 import config
 import traceback
 import re
@@ -118,7 +119,6 @@ class SalesPanelView(discord.ui.View):
         self.add_item(price_button)
 
     async def select_callback(self, interaction: discord.Interaction):
-        # ATUALIZAÇÃO: Passa o objeto 'user' para a próxima view
         await interaction.response.send_message(view=ProductSelectView(self.bot, interaction.user, interaction.data['values'][0]), ephemeral=True)
 
     async def price_table_callback(self, interaction: discord.Interaction):
@@ -126,20 +126,18 @@ class SalesPanelView(discord.ui.View):
 
 
 class ProductSelectView(discord.ui.View):
-    # ATUALIZAÇÃO: Recebe o 'user' para verificar o cargo VIP
     def __init__(self, bot: commands.Bot, user: discord.Member, category: str):
         super().__init__(timeout=None)
         self.bot = bot
         self.category = category
 
-        # Lógica para Preços VIP
         vip_role = user.guild.get_role(config.VIP_ROLE_ID)
         is_vip = vip_role in user.roles
 
         all_prices = config.PRODUCTS[category].get("prices", {}).copy()
         if is_vip and "vip_prices" in config.PRODUCTS[category]:
             vip_prices = config.PRODUCTS[category].get("vip_prices", {})
-            all_prices.update(vip_prices) # Sobrescreve os preços normais com os preços VIP
+            all_prices.update(vip_prices)
 
         options = [discord.SelectOption(label=name) for name in all_prices.keys()]
         
@@ -150,7 +148,6 @@ class ProductSelectView(discord.ui.View):
     async def product_select_callback(self, interaction: discord.Interaction):
         product_name = interaction.data['values'][0]
         
-        # Lógica para pegar o preço correto (Normal ou VIP)
         vip_role = interaction.user.guild.get_role(config.VIP_ROLE_ID)
         is_vip = vip_role in interaction.user.roles
         
