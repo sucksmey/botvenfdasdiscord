@@ -8,26 +8,23 @@ from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 from datetime import datetime
 
-# LÓGICA DE CONEXÃO ATUALIZADA
-pg_user = os.getenv('PGUSER')
-pg_password = os.getenv('PGPASSWORD')
-pg_host = os.getenv('PGHOST')
-pg_port = os.getenv('PGPORT')
-pg_database = os.getenv('PGDATABASE')
-
-if not all([pg_user, pg_password, pg_host, pg_port, pg_database]):
-    DATABASE_URL_FALLBACK = os.getenv('DATABASE_URL')
-    if DATABASE_URL_FALLBACK:
-        logging.warning("Usando DATABASE_URL de fallback.")
-        DATABASE_URL = DATABASE_URL_FALLBACK
-    else:
-        raise ValueError("Variáveis de ambiente do banco de dados não foram encontradas.")
-else:
-    DATABASE_URL = f"postgresql://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_database}"
+DATABASE_URL = os.getenv('DATABASE_URL')
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL não foi encontrada nas variáveis de ambiente.")
 
 async_db_url = make_url(DATABASE_URL).render_as_string(hide_password=False).replace("postgresql://", "postgresql+asyncpg://")
 engine = create_async_engine(async_db_url)
 metadata = MetaData()
+
+coupons = Table(
+    'coupons', metadata,
+    Column('id', Integer, primary_key=True),
+    Column('code', String(100), unique=True, nullable=False),
+    Column('discount_percentage', Integer, nullable=False),
+    Column('required_role_id', BigInteger, nullable=True), # Permite cupons para cargos específicos
+    Column('is_active', Boolean, default=True, nullable=False),
+    Column('created_at', DateTime, default=datetime.utcnow)
+)
 
 transactions = Table(
     'transactions', metadata,
@@ -37,6 +34,7 @@ transactions = Table(
     Column('channel_id', BigInteger, nullable=True),
     Column('product_name', String(255), nullable=False),
     Column('price', Float, nullable=False),
+    Column('coupon_id', Integer, ForeignKey('coupons.id'), nullable=True), # Registra qual cupom foi usado
     Column('gamepass_link', String(255), nullable=True),
     Column('review_rating', Integer, nullable=True),
     Column('review_text', String(1024), nullable=True),
@@ -46,15 +44,6 @@ transactions = Table(
     Column('timestamp', DateTime, default=datetime.utcnow),
     Column('closed_at', DateTime, nullable=True),
     Column('is_archived', Boolean, default=False, nullable=False)
-)
-
-coupons = Table(
-    'coupons', metadata,
-    Column('id', Integer, primary_key=True),
-    Column('code', String(100), unique=True, nullable=False),
-    Column('discount_percentage', Integer, nullable=False),
-    Column('is_active', Boolean, default=True, nullable=False),
-    Column('created_at', DateTime, default=datetime.utcnow)
 )
 
 used_coupons = Table(
