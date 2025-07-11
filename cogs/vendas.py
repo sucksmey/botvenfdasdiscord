@@ -10,17 +10,14 @@ from datetime import datetime
 from config import *
 import database
 
-# --- NOVA VIEW PARA ESCOLHA DE PAGAMENTO (COM A CORREÇÃO) ---
+# --- VIEW PARA ESCOLHA DE PAGAMENTO (COM A CORREÇÃO) ---
 class PaymentMethodView(discord.ui.View):
     def __init__(self, item_name: str, price: float):
-        # ALTERAÇÃO: Adicionado timeout=None para que os botões nunca expirem
+        # A correção principal está aqui: timeout=None para os botões não expirarem.
+        # IDs customizados estáticos são adicionados para robustez.
         super().__init__(timeout=None)
         self.item_name = item_name
         self.price = price
-        # Adiciona um custom_id único para cada botão para o Discord lembrar deles
-        self.pix_button.custom_id = f"pix_button_{int(datetime.now().timestamp())}"
-        self.boleto_button.custom_id = f"boleto_button_{int(datetime.now().timestamp())}"
-        self.card_button.custom_id = f"card_button_{int(datetime.now().timestamp())}"
 
     async def handle_pix_payment(self, interaction: discord.Interaction):
         ticket_data = ONGOING_SALES_DATA.get(interaction.channel.id)
@@ -47,27 +44,26 @@ class PaymentMethodView(discord.ui.View):
 
         await interaction.response.send_message(f"Certo! O atendente {mention} foi notificado e irá te enviar o link de pagamento para **{method}** em breve. Por favor, aguarde.")
 
-    @discord.ui.button(label="PIX", style=discord.ButtonStyle.primary, emoji="📲")
+    @discord.ui.button(label="PIX", style=discord.ButtonStyle.primary, emoji="📲", custom_id="pix_payment_button_static")
     async def pix_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         for item in self.children: item.disabled = True
         await interaction.message.edit(view=self)
         await self.handle_pix_payment(interaction)
 
-    @discord.ui.button(label="Boleto", style=discord.ButtonStyle.secondary, emoji="📄")
+    @discord.ui.button(label="Boleto", style=discord.ButtonStyle.secondary, emoji="📄", custom_id="boleto_payment_button_static")
     async def boleto_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         for item in self.children: item.disabled = True
         await interaction.message.edit(view=self)
         await self.handle_manual_payment(interaction, "Boleto")
 
-    @discord.ui.button(label="Cartão de Crédito", style=discord.ButtonStyle.secondary, emoji="💳")
+    @discord.ui.button(label="Cartão de Crédito", style=discord.ButtonStyle.secondary, emoji="💳", custom_id="card_payment_button_static")
     async def card_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         for item in self.children: item.disabled = True
         await interaction.message.edit(view=self)
         await self.handle_manual_payment(interaction, "Cartão de Crédito")
 
 
-# --- O RESTO DO CÓDIGO (sem alterações) ---
-
+# --- FUNÇÃO HELPER PARA PROSSEGUIR COM A VENDA ---
 async def proceed_with_sale(channel: discord.TextChannel, user: discord.Member, selected_product: str):
     product_info = PRODUCTS_DATA[selected_product]
     embed = discord.Embed(title=f"Itens para: {selected_product} {product_info['emoji']}", color=ROSE_COLOR)
@@ -115,10 +111,9 @@ class TermsConfirmationView(discord.ui.View):
     def __init__(self, selected_product: str):
         super().__init__(timeout=None)
         self.selected_product = selected_product
-        self.add_item(discord.ui.Button(label="Ler Termos de Serviço", style=discord.ButtonStyle.link, url=TERMS_URL, row=1))
-        self.children[0].custom_id = "terms_confirm_button_main"
+        self.add_item(discord.ui.Button(label="Ler Termos de Serviço", style=discord.ButtonStyle.link, url=TERMS_URL))
 
-    @discord.ui.button(label="Concordo e quero prosseguir", style=discord.ButtonStyle.success, custom_id="terms_confirm_button")
+    @discord.ui.button(label="Concordo e quero prosseguir", style=discord.ButtonStyle.success, custom_id="terms_confirm_button_main")
     async def confirm_terms(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
         for item in self.children:
@@ -129,8 +124,6 @@ class TermsConfirmationView(discord.ui.View):
 class RegionalPriceConfirmationView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.children[0].custom_id = f"regional_price_yes_{int(datetime.now().timestamp())}"
-        self.children[1].custom_id = f"regional_price_no_{int(datetime.now().timestamp())}"
 
     async def proceed_to_delivery(self, interaction: discord.Interaction):
         ticket_data = ONGOING_SALES_DATA.get(interaction.channel.id)
@@ -145,13 +138,13 @@ class RegionalPriceConfirmationView(discord.ui.View):
         except Exception as e:
             logging.error(f"Não foi possível renomear o canal {interaction.channel.id}: {e}")
 
-    @discord.ui.button(label="SIM, desativei", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="SIM, desativei", style=discord.ButtonStyle.success, custom_id="regional_price_yes_static")
     async def confirm_yes(self, interaction: discord.Interaction, button: discord.ui.Button):
         for item in self.children: item.disabled = True
         await interaction.message.edit(view=self)
         await self.proceed_to_delivery(interaction)
         
-    @discord.ui.button(label="NÃO, vou desativar", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="NÃO, vou desativar", style=discord.ButtonStyle.danger, custom_id="regional_price_no_static")
     async def confirm_no(self, interaction: discord.Interaction, button: discord.ui.Button):
         for item in self.children: item.disabled = True
         await interaction.message.edit(view=self)
@@ -284,6 +277,7 @@ class Vendas(commands.Cog):
         if robux <= 0:
             await interaction.response.send_message("Por favor, insira um valor de Robux maior que zero.", ephemeral=True)
             return
+        
         gamepass_value = math.ceil(robux / 0.7)
         embed = discord.Embed(title="🧮 Calculadora de Game Pass", description=f"Para o comprador receber **{robux} Robux**, você precisa criar uma Game Pass no valor de **{gamepass_value} Robux**.", color=ROSE_COLOR)
         await interaction.response.send_message(embed=embed)
@@ -297,7 +291,7 @@ class Vendas(commands.Cog):
         if not ticket_data: return
 
         status = ticket_data.get("status")
-        if status == 'being_attended_by_human' or status == 'awaiting_human_payment': return
+        if status in ['being_attended_by_human', 'awaiting_human_payment']: return
 
         if status == "awaiting_gamepass_link" and ("roblox.com/game-pass/" in message.content or "ro.blox.com/Ebh5" in message.content):
             ticket_data['gamepass_link'] = message.content
