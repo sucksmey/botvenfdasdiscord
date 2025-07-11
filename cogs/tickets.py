@@ -18,21 +18,25 @@ class Tickets(commands.Cog):
             return
 
         channel_name = message.channel.name.lower()
-        # Verifica se a mensagem está em um canal de ticket de Robux
+        # Garante que estamos em um canal de ticket válido antes de prosseguir
+        if not ("ticket-robux" in channel_name or "ticket-geral" in channel_name):
+            return
+
+        # 1. Fluxo para tickets de Robux
         if "ticket-robux" in channel_name:
-            # 1. Detecta comprovante (qualquer anexo)
+            # Detecta comprovante (qualquer anexo)
             if message.attachments:
                 view = GamepassCheckView()
                 await message.channel.send(
                     f"{message.author.mention}, recebemos seu comprovante! Por favor, responda abaixo:",
                     view=view
                 )
-                return # Evita que a mesma mensagem seja processada duas vezes
+                return  # Para a execução para não processar duas vezes
 
-            # 2. Detecta link de gamepass
+            # Detecta link de gamepass
             match = re.search(r'(?:game-pass/|)(\d{8,})', message.content)
             if match:
-                from .views import RegionalPricingCheckView # Evita importação circular
+                from .views import RegionalPricingCheckView  # Evita importação circular
                 view = RegionalPricingCheckView()
                 await message.reply(
                     "Ótimo! Detectei o link/ID da sua Game Pass. Antes de finalizar, por favor confirme:",
@@ -41,26 +45,9 @@ class Tickets(commands.Cog):
 
     @app_commands.command(name="minhascompras", description="Ver seu histórico de compras.")
     async def minhas_compras(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        async with self.bot.pool.acquire() as conn:
-            purchases = await conn.fetch(
-                "SELECT product_name, product_price, purchase_date FROM purchases WHERE user_id = $1 ORDER BY purchase_date DESC",
-                interaction.user.id
-            )
-        
-        if not purchases:
-            await interaction.followup.send("Você ainda não fez nenhuma compra.", ephemeral=True)
-            return
-        
-        embed = discord.Embed(title=f"Histórico de Compras de {interaction.user.name}", color=discord.Color.green())
-        description = ""
-        for p in purchases:
-            description += f"**Produto:** {p['product_name']}\n"
-            description += f"**Valor:** R$ {p['product_price']:.2f}\n"
-            description += f"**Data:** {p['purchase_date'].strftime('%d/%m/%Y %H:%M')}\n---\n"
-        
-        embed.description = description[:4096]
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        # Este comando agora é primariamente acionado pelo botão no ClientPanelView
+        # O código da view foi movido para cogs/views.py na classe ClientPanelView
+        await interaction.response.send_message("Use o painel do cliente para ver suas compras.", ephemeral=True)
 
     @app_commands.command(name="atender", description="[Admin] Libera o chat para atendimento manual no ticket.")
     @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
@@ -82,17 +69,19 @@ class Tickets(commands.Cog):
     @app_commands.command(name="tutorialgamepass", description="Envia o tutorial da Game Pass com cálculo.")
     @app_commands.describe(robux="Quantidade de Robux desejada.")
     async def tutorial_gamepass(self, interaction: discord.Interaction, robux: int):
-        preco = robux * 1.43
+        # ATUALIZAÇÃO: Converte o preço para inteiro
+        preco = int(robux * 1.43)
         await interaction.response.send_message(
-            f"O valor total da Game Pass para `{robux}` Robux é de **R$ {preco:.2f}**.\nSiga o tutorial abaixo para criar a Game Pass corretamente.",
+            f"O valor total da Game Pass para `{robux}` Robux é de **R$ {preco}**.\nSiga o tutorial abaixo para criar a Game Pass corretamente.",
             view=TutorialGamepassView()
         )
 
     @app_commands.command(name="calculadora", description="Calcula o valor de uma Game Pass.")
     @app_commands.describe(robux="Quantidade de Robux para calcular.")
     async def calculadora(self, interaction: discord.Interaction, robux: int):
-        preco = robux * 1.43
-        await interaction.response.send_message(f"O valor de uma Game Pass para `{robux}` Robux é **R$ {preco:.2f}**.", ephemeral=True)
+        # ATUALIZAÇÃO: Converte o preço para inteiro
+        preco = int(robux * 1.43)
+        await interaction.response.send_message(f"O valor de uma Game Pass para `{robux}` Robux é **R$ {preco}**.", ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(Tickets(bot))
