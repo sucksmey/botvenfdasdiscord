@@ -9,7 +9,7 @@ from .views import GamepassCheckView, TutorialGamepassView
 class Tickets(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        # Armazena {channel_id: {'product': str, 'price': float, 'admin_id': int, 'purchase_id': int}}
+        # Armazena {channel_id: {'product': str, 'price': float, 'admin_id': int, 'purchase_id': int, 'robux_amount': int}}
         self.ticket_data = {}
 
     @commands.Cog.listener()
@@ -18,35 +18,36 @@ class Tickets(commands.Cog):
             return
 
         channel_name = message.channel.name.lower()
-        # Garante que estamos em um canal de ticket válido antes de prosseguir
         if not ("ticket-robux" in channel_name or "ticket-geral" in channel_name):
             return
 
-        # 1. Fluxo para tickets de Robux
         if "ticket-robux" in channel_name:
-            # Detecta comprovante (qualquer anexo)
+            ticket_info = self.ticket_data.get(message.channel.id, {})
+            robux_amount = ticket_info.get('robux_amount', 0)
+
+            # 1. Detecta comprovante (qualquer anexo)
             if message.attachments:
-                view = GamepassCheckView()
+                # ATUALIZAÇÃO: Mensagem mais clara
+                view = GamepassCheckView(robux_amount=robux_amount)
                 await message.channel.send(
-                    f"{message.author.mention}, recebemos seu comprovante! Por favor, responda abaixo:",
+                    f"{message.author.mention}, nós entregamos por Gamepass. Você já sabe criar a gamepass?",
                     view=view
                 )
-                return  # Para a execução para não processar duas vezes
+                return
 
-            # Detecta link de gamepass
+            # 2. Detecta link de gamepass
             match = re.search(r'(?:game-pass/|)(\d{8,})', message.content)
             if match:
-                from .views import RegionalPricingCheckView  # Evita importação circular
+                from .views import RegionalPricingCheckView
                 view = RegionalPricingCheckView()
+                # ATUALIZAÇÃO: Mensagem mais direta
                 await message.reply(
-                    "Ótimo! Detectei o link/ID da sua Game Pass. Antes de finalizar, por favor confirme:",
+                    "Ótimo! Detectei o link/ID da sua Game Pass. Antes de finalizar, por favor confirme se você **DESATIVOU** os preços regionais:",
                     view=view
                 )
 
     @app_commands.command(name="minhascompras", description="Ver seu histórico de compras.")
     async def minhas_compras(self, interaction: discord.Interaction):
-        # Este comando agora é primariamente acionado pelo botão no ClientPanelView
-        # O código da view foi movido para cogs/views.py na classe ClientPanelView
         await interaction.response.send_message("Use o painel do cliente para ver suas compras.", ephemeral=True)
 
     @app_commands.command(name="atender", description="[Admin] Libera o chat para atendimento manual no ticket.")
@@ -69,7 +70,6 @@ class Tickets(commands.Cog):
     @app_commands.command(name="tutorialgamepass", description="Envia o tutorial da Game Pass com cálculo.")
     @app_commands.describe(robux="Quantidade de Robux desejada.")
     async def tutorial_gamepass(self, interaction: discord.Interaction, robux: int):
-        # ATUALIZAÇÃO: Converte o preço para inteiro
         preco = int(robux * 1.43)
         await interaction.response.send_message(
             f"O valor total da Game Pass para `{robux}` Robux é de **R$ {preco}**.\nSiga o tutorial abaixo para criar a Game Pass corretamente.",
@@ -79,7 +79,6 @@ class Tickets(commands.Cog):
     @app_commands.command(name="calculadora", description="Calcula o valor de uma Game Pass.")
     @app_commands.describe(robux="Quantidade de Robux para calcular.")
     async def calculadora(self, interaction: discord.Interaction, robux: int):
-        # ATUALIZAÇÃO: Converte o preço para inteiro
         preco = int(robux * 1.43)
         await interaction.response.send_message(f"O valor de uma Game Pass para `{robux}` Robux é **R$ {preco}**.", ephemeral=True)
 
