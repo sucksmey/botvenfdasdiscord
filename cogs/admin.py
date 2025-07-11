@@ -150,7 +150,7 @@ class Admin(commands.Cog):
                 )
 
             guild = interaction.guild
-            member_obj = await guild.fetch_member(customer.id) # Pega o objeto Member para dar o cargo
+            member_obj = await guild.fetch_member(customer.id)
             client_role = guild.get_role(config.CLIENT_ROLE_ID)
             if client_role and client_role not in member_obj.roles:
                 await member_obj.add_roles(client_role, reason="Compra aprovada.")
@@ -181,17 +181,14 @@ class Admin(commands.Cog):
         except Exception as e:
             await self.handle_error(interaction, e)
 
-    # --- NOVO COMANDO /avaliacao ---
     @app_commands.command(name="avaliacao", description="Envia um pedido de avaliação para o cliente no ticket.")
     @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
     async def avaliacao(self, interaction: discord.Interaction):
         try:
             await interaction.response.defer(ephemeral=True)
-            # Verifica se está em um canal de ticket entregue
             if not interaction.channel.name.startswith("entregue-"):
                 return await interaction.followup.send("Este comando só pode ser usado em um canal de ticket arquivado (`entregue-`).", ephemeral=True)
 
-            # Tenta encontrar o cliente pelas permissões do canal
             customer = None
             for member in interaction.channel.members:
                 if not member.bot and not member.guild_permissions.manage_channels:
@@ -201,7 +198,6 @@ class Admin(commands.Cog):
             if not customer:
                 return await interaction.followup.send("Não foi possível encontrar o cliente neste ticket.", ephemeral=True)
 
-            # Busca a última compra do cliente no banco de dados para pegar os dados corretos
             async with self.bot.pool.acquire() as conn:
                 last_purchase = await conn.fetchrow(
                     "SELECT id, admin_id FROM purchases WHERE user_id = $1 ORDER BY purchase_date DESC LIMIT 1",
@@ -209,9 +205,9 @@ class Admin(commands.Cog):
                 )
             
             if not last_purchase:
-                 return await interaction.followup.send("Nenhuma compra encontrada no banco de dados para este cliente.", ephemeral=True)
+                 return await interaction.followup.send("Nenhuma compra encontrada para este cliente.", ephemeral=True)
 
-            view = ReviewView(self.bot, last_purchase['id'], customer.id, last_purchase['admin_id'])
+            view = ReviewView(self.bot, last_purchase['id'], customer.id, last_purchase.get('admin_id'))
             await interaction.channel.send(f"Olá {customer.mention}, poderia nos dar um feedback sobre sua compra?", view=view)
             await interaction.followup.send("Pedido de avaliação enviado ao cliente.", ephemeral=True)
 
@@ -221,12 +217,35 @@ class Admin(commands.Cog):
     @app_commands.command(name="fechar", description="[Admin] Deleta o ticket atual permanentemente.")
     @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
     async def fechar(self, interaction: discord.Interaction):
-        #... (código do fechar sem alteração)
+        if "ticket-" in interaction.channel.name or "vip-" in interaction.channel.name or "atendido-" in interaction.channel.name:
+            await interaction.response.send_message("Canal será deletado em 5 segundos...", ephemeral=True)
+            await asyncio.sleep(5)
+            await interaction.channel.delete()
+        else:
+            await interaction.response.send_message("Este comando só pode ser usado em um canal de ticket.", ephemeral=True)
 
     @tasks.loop(hours=24)
     async def cleanup_task(self):
-        #... (código do cleanup sem alteração)
-        pass
+        await self.bot.wait_until_ready()
+        guild = self.bot.get_guild(config.GUILD_ID)
+        if not guild: return
+
+        entregues_category = guild.get_channel(config.CATEGORY_ENTREGUES_ID)
+        transcript_channel = guild.get_channel(config.TRANSCRIPT_CHANNEL_ID)
+        if not entregues_category or not transcript_channel: return
+
+        four_days_ago = discord.utils.utcnow() - timedelta(days=4)
+
+        for channel in entregues_category.text_channels:
+            if channel.created_at < four_days_ago:
+                try:
+                    messages = [f"[{msg.created_at.strftime('%Y-%m-%d %H:%M')}] {msg.author.name}: {msg.content}" async for msg in channel.history(limit=200, oldest_first=True)]
+                    transcript_content = "\n".join(messages) or "Nenhuma mensagem no ticket."
+                    file = discord.File(io.BytesIO(transcript_content.encode('utf-8')), filename=f"transcript-{channel.name}.txt")
+                    await transcript_channel.send(f"Transcript do ticket `{channel.name}` deletado por inatividade.", file=file)
+                    await channel.delete(reason="Limpeza automática de ticket antigo.")
+                except Exception as e:
+                    print(f"Erro ao limpar o canal {channel.id}: {e}")
 
 async def setup(bot):
     await bot.add_cog(Admin(bot))
