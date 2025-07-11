@@ -1,7 +1,7 @@
 # cogs/views.py
 import discord
 import config
-from .tickets import get_current_discount, apply_discount, generate_pix_embed # Importa as funções auxiliares
+from .helpers import get_current_discount, apply_discount, generate_pix_embed
 
 # --- Modals ---
 
@@ -35,7 +35,8 @@ class ReviewModal(discord.ui.Modal, title="Avalie nosso Atendimento"):
         embed.add_field(name="Nota", value=self.rating.value, inline=True)
         embed.add_field(name="Comentário", value=self.comment.value or "Nenhum comentário.", inline=False)
         
-        await review_channel.send(embed=embed)
+        if review_channel:
+            await review_channel.send(embed=embed)
         await interaction.response.send_message("Obrigado pela sua avaliação!", ephemeral=True)
 
 # --- Views ---
@@ -74,7 +75,6 @@ class VIPPanelView(discord.ui.View):
     
     @discord.ui.button(label="✨ Tornar-se VIP!", style=discord.ButtonStyle.success, custom_id="become_vip_button")
     async def become_vip_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Lógica para criar um ticket VIP
         guild = interaction.guild
         category = guild.get_channel(config.CATEGORY_VENDAS_ID)
         overwrites = {
@@ -87,8 +87,7 @@ class VIPPanelView(discord.ui.View):
         
         await interaction.response.send_message(f"Seu ticket VIP foi criado em {ticket_channel.mention}!", ephemeral=True)
         
-        # Envia mensagem no ticket
-        vip_price = 49.90 # Preço fixo, ajuste se necessário
+        vip_price = 49.90
         embed_pix = await generate_pix_embed(vip_price)
         await ticket_channel.send(
             f"Olá {interaction.user.mention}! Bem-vindo ao seu ticket de compra VIP.\n"
@@ -104,9 +103,10 @@ class ClientPanelView(discord.ui.View):
     
     @discord.ui.button(label="Ver Minhas Compras", style=discord.ButtonStyle.primary, custom_id="my_purchases_button")
     async def my_purchases_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Reutiliza o comando /minhascompras
         command = self.bot.tree.get_command('minhascompras', guild=discord.Object(id=config.GUILD_ID))
-        await command.callback(self.bot.get_cog("Tickets"), interaction)
+        tickets_cog = self.bot.get_cog("Tickets")
+        if command and tickets_cog:
+            await command.callback(tickets_cog, interaction)
 
 
 class ProductSelectView(discord.ui.View):
@@ -118,10 +118,9 @@ class ProductSelectView(discord.ui.View):
         product_prices = config.PRODUCTS[category]["prices"]
         options = [discord.SelectOption(label=name) for name in product_prices.keys()]
 
-        # O Discord permite no máximo 25 opções por Select. Se houver mais, precisa paginar.
         self.add_item(discord.ui.Select(
             custom_id="product_select_dropdown",
-            placeholder=f"Escolha um item de {category}...",
+            placeholder=f"Escolha um item de {self.category}...",
             options=options[:25]
         ))
 
@@ -159,12 +158,10 @@ class PurchaseConfirmView(discord.ui.View):
 
     @discord.ui.button(label="Confirmar Compra", style=discord.ButtonStyle.success, custom_id="confirm_purchase")
     async def confirm_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Desabilita botões
         for item in self.children:
             item.disabled = True
         await interaction.response.edit_message(view=self)
         
-        # Cria o ticket
         guild = interaction.guild
         category = guild.get_channel(config.CATEGORY_VENDAS_ID)
         overwrites = {
@@ -175,14 +172,12 @@ class PurchaseConfirmView(discord.ui.View):
         channel_name = f"ticket-{self.product[:20]}-{interaction.user.id}"
         ticket_channel = await guild.create_text_channel(name=channel_name, category=category, overwrites=overwrites)
         
-        # Armazena os dados do ticket
         tickets_cog = self.bot.get_cog("Tickets")
         if tickets_cog:
             tickets_cog.ticket_data[ticket_channel.id] = {'product': self.product, 'price': self.price}
         
         await interaction.followup.send(f"Seu ticket foi criado em {ticket_channel.mention}!", ephemeral=True)
         
-        # Envia PIX no ticket
         embed_pix = await generate_pix_embed(self.price)
         await ticket_channel.send(
             f"Olá {interaction.user.mention}! Você está comprando **{self.product}**.",
@@ -216,4 +211,5 @@ class PriceTableView(discord.ui.View):
 class TutorialGamepassView(discord.ui.View):
     def __init__(self):
         super().__init__()
-        self.add_item(discord.ui.Button(label="Ver Tutorial em Vídeo", url="https://www.youtube.com/watch?v=dQw4w9WgXcQ")) # Troque pela URL do seu tutorial
+        # ATUALIZADO com o novo link
+        self.add_item(discord.ui.Button(label="Ver Tutorial em Vídeo", url="http://www.youtube.com/watch?v=B-LQU3J24pI"))
