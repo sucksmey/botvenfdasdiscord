@@ -112,31 +112,55 @@ class SalesPanelView(discord.ui.View):
             select_menu = discord.ui.Select(custom_id="category_select", placeholder="Escolha um jogo ou serviço para comprar...", options=options)
             select_menu.callback = self.select_callback
             self.add_item(select_menu)
+        
         price_button = discord.ui.Button(label="Ver Tabela de Preços", style=discord.ButtonStyle.secondary, custom_id="price_table_button")
         price_button.callback = self.price_table_callback
         self.add_item(price_button)
 
     async def select_callback(self, interaction: discord.Interaction):
-        await interaction.response.send_message(view=ProductSelectView(self.bot, interaction.data['values'][0]), ephemeral=True)
+        # ATUALIZAÇÃO: Passa o objeto 'user' para a próxima view
+        await interaction.response.send_message(view=ProductSelectView(self.bot, interaction.user, interaction.data['values'][0]), ephemeral=True)
 
     async def price_table_callback(self, interaction: discord.Interaction):
         await interaction.response.send_message(view=PriceTableView(self.bot), ephemeral=True)
 
 
 class ProductSelectView(discord.ui.View):
-    def __init__(self, bot, category: str):
+    # ATUALIZAÇÃO: Recebe o 'user' para verificar o cargo VIP
+    def __init__(self, bot: commands.Bot, user: discord.Member, category: str):
         super().__init__(timeout=None)
         self.bot = bot
         self.category = category
-        product_prices = config.PRODUCTS[category]["prices"]
-        options = [discord.SelectOption(label=name) for name in product_prices.keys()]
+
+        # Lógica para Preços VIP
+        vip_role = user.guild.get_role(config.VIP_ROLE_ID)
+        is_vip = vip_role in user.roles
+
+        all_prices = config.PRODUCTS[category].get("prices", {}).copy()
+        if is_vip and "vip_prices" in config.PRODUCTS[category]:
+            vip_prices = config.PRODUCTS[category].get("vip_prices", {})
+            all_prices.update(vip_prices) # Sobrescreve os preços normais com os preços VIP
+
+        options = [discord.SelectOption(label=name) for name in all_prices.keys()]
+        
         select_menu = discord.ui.Select(custom_id="product_select_dropdown", placeholder=f"Escolha um item de {self.category}...", options=options[:25])
         select_menu.callback = self.product_select_callback
         self.add_item(select_menu)
 
     async def product_select_callback(self, interaction: discord.Interaction):
         product_name = interaction.data['values'][0]
-        base_price = config.PRODUCTS[self.category]["prices"][product_name]
+        
+        # Lógica para pegar o preço correto (Normal ou VIP)
+        vip_role = interaction.user.guild.get_role(config.VIP_ROLE_ID)
+        is_vip = vip_role in interaction.user.roles
+        
+        all_prices = config.PRODUCTS[self.category].get("prices", {}).copy()
+        if is_vip and "vip_prices" in config.PRODUCTS[self.category]:
+            vip_prices = config.PRODUCTS[self.category].get("vip_prices", {})
+            all_prices.update(vip_prices)
+
+        base_price = all_prices[product_name]
+        
         view = PurchaseConfirmView(self.bot, interaction.user, self.category, product_name, base_price)
         await interaction.response.edit_message(content=f"Você selecionou **{product_name}** por **R$ {base_price:.2f}**. Clique abaixo para confirmar e abrir um ticket.", view=view)
 
@@ -214,11 +238,9 @@ class VIPConfirmView(discord.ui.View):
 
     @discord.ui.button(label="Sim, continuar", style=discord.ButtonStyle.success)
     async def confirm_vip(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # ATUALIZAÇÃO: Adicionado o bloco try...except para capturar erros
         try:
             for item in self.children: item.disabled = True
             await interaction.response.edit_message(content="Criando seu ticket VIP...", view=self)
-
             guild = interaction.guild
             category_channel = guild.get_channel(config.CATEGORY_VENDAS_ID)
             overwrites = {
@@ -227,7 +249,6 @@ class VIPConfirmView(discord.ui.View):
                 guild.get_role(config.ADMIN_ROLE_ID): discord.PermissionOverwrite(read_messages=True)
             }
             ticket_channel = await guild.create_text_channel(name=f"vip-compra-{interaction.user.name}-{interaction.user.id}", category=category_channel, overwrites=overwrites)
-            
             pix_embed = await generate_pix_embed(config.VIP_PRICE)
             await ticket_channel.send(f"Olá {interaction.user.mention}! Para concluir a compra do seu VIP, faça o pagamento de **R$ {config.VIP_PRICE:.2f}**.", embed=pix_embed)
             await interaction.edit_original_response(content=f"Ticket VIP criado em {ticket_channel.mention}", view=None)
@@ -235,7 +256,6 @@ class VIPConfirmView(discord.ui.View):
             traceback.print_exc()
             error_message = f"😕 Ocorreu um erro ao criar o ticket VIP.\n**Erro técnico:** `{str(e)}`"
             await interaction.edit_original_response(content=error_message, view=None)
-
 
 class PriceTableView(discord.ui.View):
     def __init__(self, bot):
