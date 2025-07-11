@@ -3,6 +3,7 @@ import discord
 import config
 import traceback
 from .helpers import get_discount_info, apply_discount, generate_pix_embed
+from datetime import timedelta
 
 # --- Modals ---
 class ReviewModal(discord.ui.Modal, title="Avalie nosso Atendimento"):
@@ -254,7 +255,6 @@ class PriceTableView(discord.ui.View):
 class TutorialGamepassView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
-        # CORREÇÃO: Removido o custom_id e o ponto e vírgula extra
         self.add_item(discord.ui.Button(label="Ver Tutorial em Vídeo", url="http://www.youtube.com/watch?v=B-LQU3J24pI"))
 
 class ClientPanelView(discord.ui.View):
@@ -264,7 +264,30 @@ class ClientPanelView(discord.ui.View):
 
     @discord.ui.button(label="Ver Minhas Compras", style=discord.ButtonStyle.primary, custom_id="my_purchases_button")
     async def my_purchases_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
-        command = self.bot.tree.get_command('minhascompras')
-        tickets_cog = self.bot.get_cog("Tickets")
-        if command and tickets_cog:
-            await command.callback(tickets_cog, interaction)
+        # ATUALIZAÇÃO: Lógica movida para cá para um painel mais rico
+        await interaction.response.defer(ephemeral=True)
+        async with self.bot.pool.acquire() as conn:
+            purchases = await conn.fetch(
+                "SELECT product_name, product_price, purchase_date FROM purchases WHERE user_id = $1 ORDER BY purchase_date DESC",
+                interaction.user.id
+            )
+
+        if not purchases:
+            embed = discord.Embed(title="👤 Sua Área de Cliente", description="Você ainda não fez nenhuma compra.", color=0x3498DB)
+            embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+
+        embed = discord.Embed(title="👤 Seu Histórico de Compras", color=0x3498DB)
+        embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+        
+        description = ""
+        for p in purchases:
+            # Ajustando para o fuso horário de Brasília (UTC-3)
+            purchase_date_br = p['purchase_date'] - timedelta(hours=3)
+            description += f"**Produto:** {p['product_name']}\n"
+            description += f"**Valor:** R$ {p['product_price']:.2f}\n"
+            description += f"**Data:** {purchase_date_br.strftime('%d/%m/%Y às %H:%M')}\n---\n"
+
+        embed.description = description[:4096]
+        await interaction.followup.send(embed=embed, ephemeral=True)
