@@ -18,7 +18,6 @@ class Admin(commands.Cog):
         self.cleanup_task.cancel()
 
     async def handle_error(self, interaction: discord.Interaction, error: Exception):
-        """Função centralizada para lidar com erros e reportá-los."""
         print(f"Ocorreu um erro no comando '{interaction.command.name}':")
         traceback.print_exc()
         error_message = f"😕 Ocorreu um erro inesperado.\n**Detalhe:** `{str(error)}`"
@@ -105,26 +104,39 @@ class Admin(commands.Cog):
         except Exception as e:
             await self.handle_error(interaction, e)
 
+    # --- COMANDO /aprovar ATUALIZADO ---
     @app_commands.command(name="aprovar", description="[Admin] Aprova a compra, registra e move o ticket.")
-    @app_commands.describe(gamepass_link="O link ou ID da Game Pass do cliente.")
+    @app_commands.describe(
+        gamepass_link="O link ou ID da Game Pass do cliente.",
+        membro="(Opcional) Marque o cliente se o bot não o encontrar automaticamente."
+    )
     @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
-    async def aprovar(self, interaction: discord.Interaction, gamepass_link: str):
+    async def aprovar(self, interaction: discord.Interaction, gamepass_link: str, membro: discord.Member = None):
         try:
             await interaction.response.defer(ephemeral=True)
             channel = interaction.channel
+            customer = membro # Usa o membro marcado, se fornecido
+
+            # Se nenhum membro for marcado, tenta a detecção automática
+            if not customer:
+                try:
+                    name_parts = channel.name.split('-')
+                    # Itera de trás para frente para encontrar o primeiro número, que deve ser o ID
+                    for part in reversed(name_parts):
+                        if part.isdigit():
+                            user_id = int(part)
+                            customer = await self.bot.fetch_user(user_id)
+                            break
+                    if not customer: # Se o loop terminar e não encontrar
+                         raise ValueError("ID do usuário não encontrado no nome do canal.")
+                except (ValueError, IndexError):
+                    return await interaction.followup.send("Não consegui identificar o cliente pelo nome do canal. Por favor, use o parâmetro opcional `membro` para marcá-lo.", ephemeral=True)
+
             tickets_cog = self.bot.get_cog("Tickets")
             if not tickets_cog:
                 return await interaction.followup.send("Erro: A cog de tickets não foi encontrada.", ephemeral=True)
 
             ticket_info = tickets_cog.ticket_data.get(channel.id, {})
-            
-            try:
-                name_parts = channel.name.split('-')
-                user_id = int(name_parts[-1])
-                customer = await self.bot.fetch_user(user_id)
-            except (ValueError, IndexError):
-                return await interaction.followup.send("Não consegui identificar o cliente pelo nome do canal.", ephemeral=True)
-
             product_name = ticket_info.get('product', 'N/A')
             product_price = ticket_info.get('price', 0.0)
             atendente_id = ticket_info.get('admin_id', interaction.user.id)
