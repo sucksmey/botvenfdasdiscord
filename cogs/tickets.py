@@ -3,34 +3,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import config
-from .views import TutorialGamepassView
-
-# --- Funções Auxiliares ---
-
-async def get_current_discount(pool):
-    async with pool.acquire() as conn:
-        discount = await conn.fetchval("SELECT percentage FROM discount WHERE id = 1;")
-    return float(discount) if discount else 0.0
-
-async def apply_discount(price, discount_percentage):
-    if discount_percentage > 0:
-        return price * (1 - discount_percentage / 100)
-    return price
-
-async def generate_pix_embed(total_price):
-    # VERSÃO ATUALIZADA: Usa o link da imagem estática
-    embed = discord.Embed(
-        title="Pagamento via PIX",
-        description=f"O total da sua compra é **R$ {total_price:.2f}**.\n\n"
-                    f"**Chave PIX (E-mail):**\n`{config.PIX_KEY_MANUAL}`\n\n"
-                    f"Use o QR Code abaixo ou a chave para pagar. Após o pagamento, **envie o comprovante** neste canal.",
-        color=discord.Color.blurple()
-    )
-    # Define a imagem para a URL que você forneceu
-    embed.set_image(url="https://gorgeous-crisp-dc1e5e.netlify.app/image.png")
-    return embed
-
-# --- Cog Principal de Tickets ---
+from .helpers import generate_pix_embed # Importa apenas o necessário de helpers
+from .views import TutorialGamepassView, ReviewModal # Importa as views
 
 class Tickets(commands.Cog):
     def __init__(self, bot):
@@ -74,15 +48,21 @@ class Tickets(commands.Cog):
             await interaction.response.send_message("Este comando só pode ser usado em um canal de ticket.", ephemeral=True)
 
     @app_commands.command(name="aprovar", description="[Admin] Aprova a compra do cliente.")
-    @app_codes.describe(produto="(Opcional) Nome do produto se o bot reiniciou.", valor="(Opcional) Valor do produto se o bot reiniciou.")
+    @app_commands.describe(produto="(Opcional) Nome do produto se o bot reiniciou.", valor="(Opcional) Valor do produto se o bot reiniciou.")
     @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
     async def aprovar(self, interaction: discord.Interaction, produto: str = None, valor: float = None):
         channel = interaction.channel
         ticket_info = self.ticket_data.get(channel.id, {})
 
         try:
-            user_id = int(channel.name.split('-')[-1])
-            customer = await self.bot.fetch_user(user_id)
+            # Tenta extrair o ID do nome do canal
+            name_parts = channel.name.split('-')
+            if len(name_parts) > 1 and name_parts[-1].isdigit():
+                 user_id = int(name_parts[-1])
+                 customer = await self.bot.fetch_user(user_id)
+            else:
+                await interaction.response.send_message("Não consegui identificar o cliente pelo nome do canal. Use os parâmetros `produto` e `valor`.", ephemeral=True)
+                return
         except (ValueError, IndexError):
             await interaction.response.send_message("Não consegui identificar o cliente pelo nome do canal. Use os parâmetros `produto` e `valor`.", ephemeral=True)
             return
@@ -127,7 +107,6 @@ class Tickets(commands.Cog):
         except discord.Forbidden:
             pass
 
-        from .views import ReviewModal # Importa aqui para evitar dependência circular
         view = discord.ui.View()
         view.add_item(discord.ui.Button(label="Avaliar Atendimento", style=discord.ButtonStyle.green, custom_id="review_button"))
         await channel.send(f"Compra de {customer.mention} aprovada! Obrigado por comprar conosco.", view=view)
@@ -175,7 +154,6 @@ class Tickets(commands.Cog):
     @commands.Cog.listener()
     async def on_interaction(self, interaction: discord.Interaction):
         if interaction.type == discord.InteractionType.component and interaction.data.get("custom_id") == "review_button":
-            from .views import ReviewModal
             await interaction.response.send_modal(ReviewModal(self.bot))
 
     @app_commands.command(name="pix", description="Envia as informações de pagamento PIX no ticket.")
