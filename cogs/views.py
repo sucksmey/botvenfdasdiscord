@@ -130,7 +130,8 @@ class ProductSelectView(discord.ui.View):
         base_price = config.PRODUCTS[self.category]["prices"][product_name]
         
         discount = await get_current_discount(self.bot.pool)
-        final_price = await apply_discount(base_price, discount)
+        # CORREÇÃO: Passa o nome da categoria para a função de desconto
+        final_price = await apply_discount(self.category, base_price, discount)
         
         confirm_view = PurchaseConfirmView(
             self.bot,
@@ -139,7 +140,7 @@ class ProductSelectView(discord.ui.View):
         )
         
         message = f"Você selecionou: **{product_name}**\nPreço: `R$ {base_price:.2f}`"
-        if discount > 0:
+        if discount > 0 and self.category == "Robux":
             message += f"\nDesconto: `{discount}%`\n**Preço Final: `R$ {final_price:.2f}`**"
         else:
              message += f"\n**Preço Final: `R$ {final_price:.2f}`**"
@@ -211,5 +212,4 @@ class PriceTableView(discord.ui.View):
 class TutorialGamepassView(discord.ui.View):
     def __init__(self):
         super().__init__()
-        # ATUALIZADO com o novo link
         self.add_item(discord.ui.Button(label="Ver Tutorial em Vídeo", url="http://www.youtube.com/watch?v=B-LQU3J24pI"))
