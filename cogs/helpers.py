@@ -8,9 +8,9 @@ async def get_current_discount(pool):
         discount = await conn.fetchval("SELECT percentage FROM discount WHERE id = 1;")
     return float(discount) if discount else 0.0
 
-async def apply_discount(price, discount_percentage):
-    """Aplica o desconto a um preço."""
-    if discount_percentage > 0:
+async def apply_discount(category_name, price, discount_percentage):
+    """Aplica o desconto a um preço, SOMENTE SE a categoria for 'Robux'."""
+    if discount_percentage > 0 and category_name == "Robux":
         return price * (1 - discount_percentage / 100)
     return price
 
