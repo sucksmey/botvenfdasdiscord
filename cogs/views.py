@@ -254,7 +254,8 @@ class PriceTableView(discord.ui.View):
 class TutorialGamepassView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.add_item(discord.ui.Button(label="Ver Tutorial em Vídeo", url="http://www.youtube.com/watch?v=B-LQU3J24pI", custom_id="tutorial_gamepass_link"))
+        # CORREÇÃO: Removido o custom_id e o ponto e vírgula extra
+        self.add_item(discord.ui.Button(label="Ver Tutorial em Vídeo", url="http://www.youtube.com/watch?v=B-LQU3J24pI"))
 
 class ClientPanelView(discord.ui.View):
     def __init__(self, bot):
