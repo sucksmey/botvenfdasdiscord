@@ -6,7 +6,7 @@ import config
 import traceback
 import random
 
-# --- Textos das Propagandas (com a primeira mensagem ATUALIZADA) ---
+# --- Textos das Propagandas ---
 AD_MESSAGES = [
     {
         "content": "🎉 Sua primeira compra na **ISRABUY** tem presente!",
@@ -108,7 +108,8 @@ class Advertising(commands.Cog):
         except Exception as e:
             await self.handle_error(interaction, e)
 
-    @tasks.loop(hours=1)
+    # --- ATUALIZAÇÃO DO TEMPO ---
+    @tasks.loop(minutes=2)
     async def update_ad_message(self):
         try:
             async with self.bot.pool.acquire() as conn:
