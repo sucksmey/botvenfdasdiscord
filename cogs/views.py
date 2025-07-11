@@ -32,7 +32,6 @@ class RegionalPricingCheckView(discord.ui.View):
     @discord.ui.button(label="Sim, desativei", style=discord.ButtonStyle.success, custom_id="regional_yes")
     async def sim_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         for item in self.children: item.disabled = True
-        # ATUALIZAÇÃO: Mensagem final simplificada
         await interaction.response.edit_message(
             content=f"Perfeito! O entregador <@{config.ROBUX_DELIVERY_USER_ID}> foi notificado e fará a entrega em breve.",
             view=self
@@ -61,19 +60,14 @@ class GamepassCheckView(discord.ui.View):
     @discord.ui.button(label="Não, preciso de ajuda", style=discord.ButtonStyle.secondary, custom_id="gp_no")
     async def nao_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         for item in self.children: item.disabled = True
-        
-        # ATUALIZAÇÃO: Cálculo do valor da gamepass
-        gamepass_value = int((self.robux_amount / 0.7) + 0.99) # Adiciona 0.99 para garantir o arredondamento para cima
-        
+        gamepass_value = int((self.robux_amount / 0.7) + 0.99)
         description = (
             "Siga os passos no vídeo para criar sua Game Pass corretamente.\n\n"
             f"**IMPORTANTE:** Você deve criar a Game Pass com o valor de **`{gamepass_value}` Robux** para receber a quantia correta.\n\n"
             "Lembre-se também de **DESATIVAR** os preços regionais. Após criar, envie o link ou ID dela aqui no chat."
         )
-        
         tutorial_embed = discord.Embed(title="Tutorial - Criando uma Game Pass", description=description, color=discord.Color.blue())
         tutorial_embed.add_field(name="Link do Tutorial", value="[Clique aqui para assistir](http://www.youtube.com/watch?v=B-LQU3J24pI)")
-        
         await interaction.response.edit_message(embed=tutorial_embed, view=self)
 
 # --- View de Pagamento ---
@@ -82,7 +76,6 @@ class PaymentMethodView(discord.ui.View):
         super().__init__(timeout=None)
         self.bot = bot
         self.price = price
-
         initial_message = f"Você selecionou: **{product}**\n"
         if discount_applied:
             initial_message += f"Preço Original: `R$ {original_price:.2f}`\n"
@@ -119,7 +112,6 @@ class SalesPanelView(discord.ui.View):
             select_menu = discord.ui.Select(custom_id="category_select", placeholder="Escolha um jogo ou serviço para comprar...", options=options)
             select_menu.callback = self.select_callback
             self.add_item(select_menu)
-        
         price_button = discord.ui.Button(label="Ver Tabela de Preços", style=discord.ButtonStyle.secondary, custom_id="price_table_button")
         price_button.callback = self.price_table_callback
         self.add_item(price_button)
@@ -138,7 +130,6 @@ class ProductSelectView(discord.ui.View):
         self.category = category
         product_prices = config.PRODUCTS[category]["prices"]
         options = [discord.SelectOption(label=name) for name in product_prices.keys()]
-        
         select_menu = discord.ui.Select(custom_id="product_select_dropdown", placeholder=f"Escolha um item de {self.category}...", options=options[:25])
         select_menu.callback = self.product_select_callback
         self.add_item(select_menu)
@@ -146,7 +137,6 @@ class ProductSelectView(discord.ui.View):
     async def product_select_callback(self, interaction: discord.Interaction):
         product_name = interaction.data['values'][0]
         base_price = config.PRODUCTS[self.category]["prices"][product_name]
-        
         view = PurchaseConfirmView(self.bot, interaction.user, self.category, product_name, base_price)
         await interaction.response.edit_message(content=f"Você selecionou **{product_name}** por **R$ {base_price:.2f}**. Clique abaixo para confirmar e abrir um ticket.", view=view)
 
@@ -165,16 +155,13 @@ class PurchaseConfirmView(discord.ui.View):
         try:
             for item in self.children: item.disabled = True
             await interaction.response.edit_message(content="Abrindo seu ticket...", view=None)
-
             discount_info = await get_discount_info(self.bot.pool)
             final_price, was_discounted = await apply_discount(self.member, self.category, self.price, discount_info)
-
             async with self.bot.pool.acquire() as conn:
                 purchase_id = await conn.fetchval(
                     "INSERT INTO purchases (user_id, product_name, product_price) VALUES ($1, $2, $3) RETURNING id",
                     self.member.id, self.product, final_price
                 )
-
             guild = interaction.guild
             category_channel = guild.get_channel(config.CATEGORY_VENDAS_ID)
             overwrites = {
@@ -184,24 +171,19 @@ class PurchaseConfirmView(discord.ui.View):
             }
             channel_name_prefix = "robux" if self.category == "Robux" else "geral"
             ticket_channel = await guild.create_text_channel(name=f"ticket-{channel_name_prefix}-{self.member.name}-{self.member.id}", category=category_channel, overwrites=overwrites)
-            
             tickets_cog = self.bot.get_cog("Tickets")
             if tickets_cog:
-                # ATUALIZAÇÃO: Salva a quantidade de robux no ticket_data se for um produto robux
                 ticket_payload = {'product': self.product, 'price': final_price, 'purchase_id': purchase_id}
                 if self.category == "Robux":
                     try:
                         robux_amount = int(re.search(r'\d+', self.product).group())
                         ticket_payload['robux_amount'] = robux_amount
                     except (ValueError, AttributeError):
-                        pass # Não conseguiu extrair a quantia, segue sem ela
+                        pass
                 tickets_cog.ticket_data[ticket_channel.id] = ticket_payload
-            
             payment_view = PaymentMethodView(self.bot, self.product, final_price, self.price, was_discounted)
             await ticket_channel.send(f"Olá {self.member.mention}!", embed=discord.Embed(description=payment_view.initial_message, color=0x36393F), view=payment_view)
-            
             await interaction.edit_original_response(content=f"Ticket criado: {ticket_channel.mention}", view=None)
-        
         except Exception as e:
             traceback.print_exc()
             error_message = f"😕 Ocorreu um erro ao criar o ticket.\n**Causa provável:** O bot não tem permissão para criar canais nesta categoria.\n\n**Erro técnico:** `{str(e)}`"
@@ -232,10 +214,29 @@ class VIPConfirmView(discord.ui.View):
 
     @discord.ui.button(label="Sim, continuar", style=discord.ButtonStyle.success)
     async def confirm_vip(self, interaction: discord.Interaction, button: discord.ui.Button):
-        for item in self.children: item.disabled = True
-        await interaction.response.edit_message(content="Criando seu ticket VIP...", view=self)
-        # ... Lógica de criação de ticket VIP
-        
+        # ATUALIZAÇÃO: Adicionado o bloco try...except para capturar erros
+        try:
+            for item in self.children: item.disabled = True
+            await interaction.response.edit_message(content="Criando seu ticket VIP...", view=self)
+
+            guild = interaction.guild
+            category_channel = guild.get_channel(config.CATEGORY_VENDAS_ID)
+            overwrites = {
+                guild.default_role: discord.PermissionOverwrite(read_messages=False),
+                interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+                guild.get_role(config.ADMIN_ROLE_ID): discord.PermissionOverwrite(read_messages=True)
+            }
+            ticket_channel = await guild.create_text_channel(name=f"vip-compra-{interaction.user.name}-{interaction.user.id}", category=category_channel, overwrites=overwrites)
+            
+            pix_embed = await generate_pix_embed(config.VIP_PRICE)
+            await ticket_channel.send(f"Olá {interaction.user.mention}! Para concluir a compra do seu VIP, faça o pagamento de **R$ {config.VIP_PRICE:.2f}**.", embed=pix_embed)
+            await interaction.edit_original_response(content=f"Ticket VIP criado em {ticket_channel.mention}", view=None)
+        except Exception as e:
+            traceback.print_exc()
+            error_message = f"😕 Ocorreu um erro ao criar o ticket VIP.\n**Erro técnico:** `{str(e)}`"
+            await interaction.edit_original_response(content=error_message, view=None)
+
+
 class PriceTableView(discord.ui.View):
     def __init__(self, bot):
         super().__init__(timeout=None)
