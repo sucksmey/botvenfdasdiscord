@@ -4,7 +4,9 @@ from discord import app_commands
 from discord.ext import commands, tasks
 from datetime import datetime, timedelta
 import config
-from .views import SalesPanelView, VIPPanelView, ClientPanelView, PriceTableView
+import io
+# Importa as views diretamente do arquivo de views
+from .views import SalesPanelView, VIPPanelView, ClientPanelView
 
 class Admin(commands.Cog):
     def __init__(self, bot):
@@ -22,7 +24,8 @@ class Admin(commands.Cog):
             description="Bem-vindo à nossa loja! Selecione uma categoria abaixo para ver os produtos disponíveis ou clique no botão para ver a tabela completa.",
             color=discord.Color.blue()
         )
-        embed.set_image(url="https://i.imgur.com/your-banner-image.png") # Coloque uma URL de banner aqui
+        # Você pode adicionar um banner aqui, se quiser
+        # embed.set_image(url="https://i.imgur.com/your-banner-image.png") 
         await interaction.channel.send(embed=embed, view=SalesPanelView(self.bot))
         await interaction.response.send_message("Painel de vendas criado!", ephemeral=True)
 
@@ -51,7 +54,6 @@ class Admin(commands.Cog):
         await interaction.channel.send(embed=embed, view=ClientPanelView(self.bot))
         await interaction.response.send_message("Painel do cliente criado!", ephemeral=True)
 
-    # Grupo de comandos para desconto
     desconto_group = app_commands.Group(name="desconto", description="Gerencia o desconto global.", guild_ids=[config.GUILD_ID])
 
     @desconto_group.command(name="aplicar", description="Aplica um desconto global em porcentagem.")
@@ -80,25 +82,23 @@ class Admin(commands.Cog):
         else:
             await interaction.response.send_message("Este comando só pode ser usado em um canal de ticket.", ephemeral=True)
 
-    # Tarefa de limpeza de tickets antigos
     @tasks.loop(hours=24)
     async def cleanup_task(self):
         await self.bot.wait_until_ready()
         guild = self.bot.get_guild(config.GUILD_ID)
+        if not guild: return
+
         entregues_category = guild.get_channel(config.CATEGORY_ENTREGUES_ID)
         transcript_channel = guild.get_channel(config.TRANSCRIPT_CHANNEL_ID)
-        four_days_ago = datetime.utcnow() - timedelta(days=4)
+        if not entregues_category or not transcript_channel: return
+
+        four_days_ago = discord.utils.utcnow() - timedelta(days=4)
 
         for channel in entregues_category.text_channels:
-            # Pega a data de criação do canal para verificar a idade
-            if channel.created_at.replace(tzinfo=None) < four_days_ago:
+            if channel.created_at < four_days_ago:
                 try:
-                    # Gera um transcript simples
                     messages = [f"[{msg.created_at.strftime('%Y-%m-%d %H:%M')}] {msg.author.name}: {msg.content}" async for msg in channel.history(limit=200, oldest_first=True)]
-                    transcript_content = "\n".join(messages)
-                    
-                    if not transcript_content:
-                        transcript_content = "Nenhuma mensagem no ticket."
+                    transcript_content = "\n".join(messages) or "Nenhuma mensagem no ticket."
                     
                     file = discord.File(io.BytesIO(transcript_content.encode('utf-8')), filename=f"transcript-{channel.name}.txt")
 
@@ -108,7 +108,4 @@ class Admin(commands.Cog):
                     print(f"Erro ao limpar o canal {channel.id}: {e}")
 
 async def setup(bot):
-    # Importar views aqui para evitar importação circular
-    from . import views
-    # Adicionar a cog
     await bot.add_cog(Admin(bot))
