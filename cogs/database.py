@@ -10,7 +10,6 @@ class Database(commands.Cog):
         await self.bot.wait_until_ready()
         async with self.bot.pool.acquire() as conn:
             async with conn.transaction():
-                # Tabela para compras gerais
                 await conn.execute('''
                     CREATE TABLE IF NOT EXISTS purchases (
                         id SERIAL PRIMARY KEY,
@@ -23,12 +22,20 @@ class Database(commands.Cog):
                         gamepass_link TEXT
                     );
                 ''')
-                # Tabela para desconto global
                 await conn.execute('''
                     CREATE TABLE IF NOT EXISTS discount (
                         id INT PRIMARY KEY,
                         percentage NUMERIC(5, 2) NOT NULL,
                         apply_to_all BOOLEAN DEFAULT FALSE
+                    );
+                ''')
+                # NOVA TABELA PARA A MENSAGEM DE PROPAGANDA
+                await conn.execute('''
+                    CREATE TABLE IF NOT EXISTS ad_message (
+                        id INT PRIMARY KEY,
+                        channel_id BIGINT NOT NULL,
+                        message_id BIGINT NOT NULL,
+                        current_index INT NOT NULL
                     );
                 ''')
             print("Tabelas do banco de dados verificadas/criadas.")
