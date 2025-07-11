@@ -5,7 +5,7 @@ from discord.ext import commands, tasks
 from datetime import datetime, timedelta
 import config
 import io
-# Importa as views diretamente do arquivo de views
+import asyncio
 from .views import SalesPanelView, VIPPanelView, ClientPanelView
 
 class Admin(commands.Cog):
@@ -19,19 +19,22 @@ class Admin(commands.Cog):
     @app_commands.command(name="setupvendas", description="Posta o painel de vendas no canal.")
     @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
     async def setup_vendas(self, interaction: discord.Interaction):
+        # Responde primeiro para evitar o timeout
+        await interaction.response.send_message("Criando painel de vendas...", ephemeral=True)
+
         embed = discord.Embed(
             title="🛒 | Central de Vendas - Israbuy",
             description="Bem-vindo à nossa loja! Selecione uma categoria abaixo para ver os produtos disponíveis ou clique no botão para ver a tabela completa.",
             color=discord.Color.blue()
         )
-        # Você pode adicionar um banner aqui, se quiser
-        # embed.set_image(url="https://i.imgur.com/your-banner-image.png") 
+        
+        # Envia o painel no canal como uma nova mensagem
         await interaction.channel.send(embed=embed, view=SalesPanelView(self.bot))
-        await interaction.response.send_message("Painel de vendas criado!", ephemeral=True)
 
     @app_commands.command(name="setupvip", description="Posta o painel de compra de VIP.")
     @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
     async def setup_vip(self, interaction: discord.Interaction):
+        await interaction.response.send_message("Criando painel VIP...", ephemeral=True)
         embed = discord.Embed(
             title="⭐ | Torne-se VIP!",
             description=(
@@ -41,36 +44,35 @@ class Admin(commands.Cog):
             color=discord.Color.gold()
         )
         await interaction.channel.send(embed=embed, view=VIPPanelView(self.bot))
-        await interaction.response.send_message("Painel VIP criado!", ephemeral=True)
 
     @app_commands.command(name="setuppainelcliente", description="Posta o painel da área do cliente.")
     @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
     async def setup_painel_cliente(self, interaction: discord.Interaction):
+        await interaction.response.send_message("Criando painel do cliente...", ephemeral=True)
         embed = discord.Embed(
             title="👤 | Área do Cliente",
             description="Clique no botão abaixo para consultar seu histórico de compras.",
             color=discord.Color.green()
         )
         await interaction.channel.send(embed=embed, view=ClientPanelView(self.bot))
-        await interaction.response.send_message("Painel do cliente criado!", ephemeral=True)
 
     desconto_group = app_commands.Group(name="desconto", description="Gerencia o desconto global.", guild_ids=[config.GUILD_ID])
 
-    @desconto_group.command(name="aplicar", description="Aplica um desconto global em porcentagem.")
+    @desconto_group.command(name="aplicar", description="Aplica um desconto global (APENAS PARA ROBUX).")
     @app_commands.describe(porcentagem="Valor do desconto (ex: 10 para 10%).")
     @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
     async def aplicar_desconto(self, interaction: discord.Interaction, porcentagem: float):
         async with self.bot.pool.acquire() as conn:
             await conn.execute("DELETE FROM discount WHERE id = 1;")
             await conn.execute("INSERT INTO discount (id, percentage) VALUES (1, $1);", porcentagem)
-        await interaction.response.send_message(f"✅ Desconto global de **{porcentagem}%** aplicado com sucesso!", ephemeral=True)
+        await interaction.response.send_message(f"✅ Desconto de **{porcentagem}%** aplicado com sucesso para a categoria ROBUX!", ephemeral=True)
 
-    @desconto_group.command(name="remover", description="Remove o desconto global ativo.")
+    @desconto_group.command(name="remover", description="Remove o desconto global de Robux.")
     @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
     async def remover_desconto(self, interaction: discord.Interaction):
         async with self.bot.pool.acquire() as conn:
             await conn.execute("DELETE FROM discount WHERE id = 1;")
-        await interaction.response.send_message("🗑️ Desconto global removido. Os preços voltaram ao normal.", ephemeral=True)
+        await interaction.response.send_message("🗑️ Desconto de Robux removido. Os preços voltaram ao normal.", ephemeral=True)
 
     @app_commands.command(name="fechar", description="[Admin] Deleta o ticket atual permanentemente.")
     @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
