@@ -42,30 +42,49 @@ class ReviewModal(discord.ui.Modal, title="Avalie nosso Atendimento"):
 # --- Views ---
 
 class SalesPanelView(discord.ui.View):
+    # LÓGICA CORRIGIDA E ROBUSTA
     def __init__(self, bot):
         super().__init__(timeout=None)
         self.bot = bot
-        
+
+        # 1. Gera a lista de opções de forma segura
         options = [
-            discord.SelectOption(label=category, emoji=details["emoji"])
-            for category, details in config.PRODUCTS.items() if details["prices"]
+            discord.SelectOption(label=category, emoji=details.get("emoji", "⚫"))
+            for category, details in config.PRODUCTS.items() if details.get("prices")
         ]
 
-        self.add_item(discord.ui.Select(
-            custom_id="category_select",
-            placeholder="Selecione uma categoria de produto...",
-            options=options
-        ))
-    
-    @discord.ui.select(custom_id="category_select")
-    async def select_callback(self, interaction: discord.Interaction, select: discord.ui.Select):
-        category = select.values[0]
-        product_view = ProductSelectView(self.bot, category)
-        await interaction.response.send_message("Agora, escolha o produto desejado:", view=product_view, ephemeral=True)
+        # 2. SÓ ADICIONA O MENU SE A LISTA DE OPÇÕES NÃO ESTIVER VAZIA
+        if options:
+            select_menu = discord.ui.Select(
+                custom_id="category_select",
+                placeholder="Escolha um jogo ou serviço para comprar...",
+                options=options
+            )
+            select_menu.callback = self.select_callback # Define a função de callback
+            self.add_item(select_menu)
 
-    @discord.ui.button(label="Ver Tabela de Preços", style=discord.ButtonStyle.secondary, custom_id="price_table_button")
-    async def price_table_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(view=PriceTableView(self.bot), ephemeral=True)
+        # 3. Adiciona o botão de qualquer maneira
+        price_button = discord.ui.Button(
+            label="Ver Tabela de Preços",
+            style=discord.ButtonStyle.secondary,
+            custom_id="price_table_button"
+        )
+        price_button.callback = self.price_table_callback # Define a função de callback
+        self.add_item(price_button)
+
+    async def select_callback(self, interaction: discord.Interaction):
+        # A resposta do defer agora é privada para não poluir o chat
+        await interaction.response.defer(ephemeral=True)
+        
+        # Pega a categoria que o usuário selecionou no menu
+        category = interaction.data['values'][0]
+        product_view = ProductSelectView(self.bot, category)
+        
+        await interaction.followup.send("Agora, escolha o produto desejado:", view=product_view, ephemeral=True)
+
+    async def price_table_callback(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        await interaction.followup.send(view=PriceTableView(self.bot), ephemeral=True)
 
 
 class VIPPanelView(discord.ui.View):
@@ -118,19 +137,21 @@ class ProductSelectView(discord.ui.View):
         product_prices = config.PRODUCTS[category]["prices"]
         options = [discord.SelectOption(label=name) for name in product_prices.keys()]
 
-        self.add_item(discord.ui.Select(
+        select_menu = discord.ui.Select(
             custom_id="product_select_dropdown",
             placeholder=f"Escolha um item de {self.category}...",
             options=options[:25]
-        ))
+        )
+        select_menu.callback = self.product_select_callback
+        self.add_item(select_menu)
 
-    @discord.ui.select(custom_id="product_select_dropdown")
-    async def product_select_callback(self, interaction: discord.Interaction, select: discord.ui.Select):
-        product_name = select.values[0]
+    async def product_select_callback(self, interaction: discord.Interaction):
+        await interaction.response.defer() 
+
+        product_name = interaction.data['values'][0]
         base_price = config.PRODUCTS[self.category]["prices"][product_name]
         
         discount = await get_current_discount(self.bot.pool)
-        # CORREÇÃO: Passa o nome da categoria para a função de desconto
         final_price = await apply_discount(self.category, base_price, discount)
         
         confirm_view = PurchaseConfirmView(
@@ -147,7 +168,7 @@ class ProductSelectView(discord.ui.View):
             
         message += "\n\nClique em **Confirmar** para criar um ticket de compra."
         
-        await interaction.response.edit_message(content=message, view=confirm_view)
+        await interaction.edit_original_response(content=message, view=confirm_view)
 
 
 class PurchaseConfirmView(discord.ui.View):
@@ -191,14 +212,22 @@ class PriceTableView(discord.ui.View):
         super().__init__(timeout=180)
         self.bot = bot
         options = [
-            discord.SelectOption(label=category, emoji=details["emoji"])
-            for category, details in config.PRODUCTS.items() if details["prices"]
+            discord.SelectOption(label=category, emoji=details.get("emoji", "⚫"))
+            for category, details in config.PRODUCTS.items() if details.get("prices")
         ]
-        self.add_item(discord.ui.Select(custom_id="price_table_select", placeholder="Ver preços de qual categoria?", options=options))
+        
+        if options:
+            select_menu = discord.ui.Select(
+                custom_id="price_table_select",
+                placeholder="Ver preços de qual categoria?",
+                options=options
+            )
+            select_menu.callback = self.price_table_select_callback
+            self.add_item(select_menu)
 
-    @discord.ui.select(custom_id="price_table_select")
-    async def price_table_select_callback(self, interaction: discord.Interaction, select: discord.ui.Select):
-        category = select.values[0]
+    async def price_table_select_callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        category = interaction.data['values'][0]
         prices = config.PRODUCTS[category]["prices"]
         
         embed = discord.Embed(title=f"Tabela de Preços - {category}", color=discord.Color.random())
@@ -207,7 +236,7 @@ class PriceTableView(discord.ui.View):
             description += f"**{name}**: R$ {price:.2f}\n"
         
         embed.description = description
-        await interaction.response.edit_message(embed=embed, view=self)
+        await interaction.edit_original_response(embed=embed, view=self)
 
 class TutorialGamepassView(discord.ui.View):
     def __init__(self):
