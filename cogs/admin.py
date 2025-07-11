@@ -12,7 +12,7 @@ import database
 from sqlalchemy import insert, select, update
 from cogs.cliente import CustomerAreaView
 
-# NOVO: Grupo de comandos para cupons
+# Grupo de comandos para cupons
 cupom_group = app_commands.Group(name="cupom", description="Gerenciamento de cupons de desconto.")
 
 class Admin(commands.Cog):
@@ -23,7 +23,6 @@ class Admin(commands.Cog):
     def cog_unload(self):
         self.cleanup_loop.cancel()
 
-    # --- COMANDOS DE CUPOM ---
     @cupom_group.command(name="criar", description="Cria um novo cupom de desconto.")
     @app_commands.checks.has_role(ADMIN_ROLE_ID)
     @app_commands.describe(codigo="O código do cupom (ex: BEMVINDO10)", desconto="A porcentagem de desconto (ex: 10 para 10%)")
@@ -134,6 +133,29 @@ class Admin(commands.Cog):
     async def before_cleanup(self):
         await self.bot.wait_until_ready()
 
+    @app_commands.command(name="pix", description="[Admin] Envia as informações de pagamento Pix no canal.")
+    @app_commands.guilds(discord.Object(id=GUILD_ID))
+    @app_commands.checks.has_role(ADMIN_ROLE_ID)
+    async def pix(self, interaction: discord.Interaction):
+        pix_embed = discord.Embed(title="Pagamento via PIX", description="Use o QR Code acima ou a chave PIX (E-mail) enviada abaixo.", color=ROSE_COLOR)
+        pix_embed.set_footer(text="Após pagar, por favor, envie o comprovante neste chat.")
+        pix_embed.set_image(url=QR_CODE_URL)
+        await interaction.response.send_message(embed=pix_embed)
+        await interaction.channel.send(PIX_KEY_MANUAL)
+
+    @app_commands.command(name="tutorialgamepass", description="[Admin] Envia o tutorial e o cálculo da Game Pass.")
+    @app_commands.guilds(discord.Object(id=GUILD_ID))
+    @app_commands.checks.has_role(ADMIN_ROLE_ID)
+    @app_commands.describe(robux="A quantidade de Robux que o cliente irá receber.")
+    async def tutorial_gamepass(self, interaction: discord.Interaction, robux: int):
+        if robux <= 0:
+            await interaction.response.send_message("A quantidade de Robux deve ser positiva.", ephemeral=True)
+            return
+        
+        gamepass_value = math.ceil(robux / 0.7)
+        embed = discord.Embed(title="📄 Tutorial e Cálculo da Game Pass", description=f"Para receber **{robux} Robux**, é preciso criar uma Game Pass no valor de **{gamepass_value} Robux**.\n\nAssista a este vídeo tutorial para aprender como fazer:\n{TUTORIAL_GAMEPASS_URL}\n\n**Importante:** Ao criar, **NÃO** marque a opção de preços regionais.", color=ROSE_COLOR)
+        await interaction.response.send_message(embed=embed)
+
     @app_commands.command(name="atender", description="[Admin] Libera o chat para o admin e renomeia o canal.")
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.checks.has_role(ADMIN_ROLE_ID)
@@ -191,10 +213,10 @@ class Admin(commands.Cog):
                             corrected_valor = float(valor.replace(',', '.'))
                             ticket_data = {'client_id': client_id, 'item_name': produto, 'final_price': corrected_valor}
                         except ValueError:
-                            await interaction.followup.send("⚠️ O valor manual que você inseriu não é um número válido. Use o formato `4.50`.", ephemeral=True)
+                            await interaction.followup.send("⚠️ O valor manual que você inseriu não é um número válido.", ephemeral=True)
                             return
                     else:
-                        await interaction.followup.send("⚠️ O bot esqueceu os detalhes. Use `/aprovar` com os campos `produto` e `valor`.", ephemeral=True)
+                        await interaction.followup.send("⚠️ O bot esqueceu os detalhes. Use `/aprovar` com `produto` e `valor`.", ephemeral=True)
                         return
                 except (IndexError, ValueError):
                      await interaction.followup.send("❌ Não foi possível recuperar o cliente deste ticket.", ephemeral=True); return
@@ -232,7 +254,7 @@ class Admin(commands.Cog):
         try:
             dm_embed = discord.Embed(title="❤️ Obrigado pela sua compra!", description=f"Sua compra de **{final_product_name}** foi concluída.\n\nAgradecemos a preferência! Clique abaixo para ver seu histórico.", color=ROSE_COLOR)
             dm_embed.set_thumbnail(url=IMAGE_URL_FOR_EMBEDS)
-            await membro.send(embed=dm_embed, view=CustomerAreaView())
+            await membro.send(embed=embed=dm_embed, view=CustomerAreaView())
         except Exception as e:
             logging.warning(f"Não foi possível enviar a DM para {membro.name}: {e}")
 
@@ -284,6 +306,20 @@ class Admin(commands.Cog):
         await interaction.response.send_message("Este canal será **deletado permanentemente** em 5 segundos...", ephemeral=True)
         await asyncio.sleep(5)
         await channel.delete(reason="Fechado manualmente por um admin.")
+
+    @app_commands.command(name="sync", description="[Admin] Força a sincronização dos comandos com o Discord.")
+    @app_commands.guilds(discord.Object(id=GUILD_ID))
+    @app_commands.checks.has_role(ADMIN_ROLE_ID)
+    async def sync(self, interaction: discord.Interaction):
+        await interaction.response.send_message("Sincronizando comandos...", ephemeral=True)
+        try:
+            synced = await self.bot.tree.sync(guild=discord.Object(id=GUILD_ID))
+            await interaction.followup.send(f"Sincronizados {len(synced)} comandos com este servidor.", ephemeral=True)
+            logging.info(f"Sincronização manual forçada por {interaction.user}. Sincronizados {len(synced)} comandos.")
+        except Exception as e:
+            logging.error(f"Falha na sincronização manual: {e}")
+            await interaction.followup.send(f"Falha ao sincronizar: {e}", ephemeral=True)
+
 
 async def setup(bot: commands.Bot):
     bot.tree.add_command(cupom_group, guild=discord.Object(id=GUILD_ID))
