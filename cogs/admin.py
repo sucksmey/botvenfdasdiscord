@@ -51,7 +51,6 @@ class Admin(commands.Cog):
             logging.error(f"Erro ao criar cupom: {e}")
             await interaction.followup.send("Ocorreu um erro ao tentar criar o cupom.", ephemeral=True)
 
-
     @cupom_group.command(name="listar", description="Lista todos os cupons ativos.")
     @app_commands.checks.has_role(ADMIN_ROLE_ID)
     async def listar_cupons(self, interaction: discord.Interaction):
@@ -137,7 +136,7 @@ class Admin(commands.Cog):
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.checks.has_role(ADMIN_ROLE_ID)
     async def pix(self, interaction: discord.Interaction):
-        pix_embed = discord.Embed(title="Pagamento via PIX", description="Use o QR Code acima ou a chave PIX (E-mail) enviada abaixo.", color=ROSE_COLOR)
+        pix_embed = discord.Embed(title="Pagamento via PIX", description="Use o QR Code acima ou a chave PIX (E-mail) enviada abaixo para efetuar o pagamento.", color=ROSE_COLOR)
         pix_embed.set_footer(text="Após pagar, por favor, envie o comprovante neste chat.")
         pix_embed.set_image(url=QR_CODE_URL)
         await interaction.response.send_message(embed=pix_embed)
@@ -213,11 +212,9 @@ class Admin(commands.Cog):
                             corrected_valor = float(valor.replace(',', '.'))
                             ticket_data = {'client_id': client_id, 'item_name': produto, 'final_price': corrected_valor}
                         except ValueError:
-                            await interaction.followup.send("⚠️ O valor manual que você inseriu não é um número válido.", ephemeral=True)
-                            return
+                            await interaction.followup.send("⚠️ O valor manual que você inseriu não é um número válido.", ephemeral=True); return
                     else:
-                        await interaction.followup.send("⚠️ O bot esqueceu os detalhes. Use `/aprovar` com `produto` e `valor`.", ephemeral=True)
-                        return
+                        await interaction.followup.send("⚠️ O bot esqueceu os detalhes. Use `/aprovar` com os campos `produto` e `valor`.", ephemeral=True); return
                 except (IndexError, ValueError):
                      await interaction.followup.send("❌ Não foi possível recuperar o cliente deste ticket.", ephemeral=True); return
             else:
@@ -254,7 +251,7 @@ class Admin(commands.Cog):
         try:
             dm_embed = discord.Embed(title="❤️ Obrigado pela sua compra!", description=f"Sua compra de **{final_product_name}** foi concluída.\n\nAgradecemos a preferência! Clique abaixo para ver seu histórico.", color=ROSE_COLOR)
             dm_embed.set_thumbnail(url=IMAGE_URL_FOR_EMBEDS)
-            await membro.send(embed=embed=dm_embed, view=CustomerAreaView())
+            await membro.send(embed=dm_embed, view=CustomerAreaView())
         except Exception as e:
             logging.warning(f"Não foi possível enviar a DM para {membro.name}: {e}")
 
