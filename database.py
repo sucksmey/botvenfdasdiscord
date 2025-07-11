@@ -1,37 +1,35 @@
-# database.py
-import os
-import logging
-from sqlalchemy import (Table, Column, Integer, String, Float, DateTime, BigInteger, Boolean, MetaData)
-from sqlalchemy.ext.asyncio import create_async_engine
-from datetime import datetime
+# cogs/database.py
+from discord.ext import commands
 
-DATABASE_URL = os.getenv('DATABASE_URL')
-if not DATABASE_URL:
-    raise ValueError("DATABASE_URL não foi encontrada!")
+class Database(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        self.bot.loop.create_task(self.setup_tables())
 
-engine = create_async_engine(DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1))
-metadata = MetaData()
+    async def setup_tables(self):
+        await self.bot.wait_until_ready()
+        async with self.bot.pool.acquire() as conn:
+            async with conn.transaction():
+                # Tabela para compras gerais
+                await conn.execute('''
+                    CREATE TABLE IF NOT EXISTS purchases (
+                        id SERIAL PRIMARY KEY,
+                        user_id BIGINT NOT NULL,
+                        admin_id BIGINT,
+                        product_name TEXT NOT NULL,
+                        product_price NUMERIC(10, 2) NOT NULL,
+                        purchase_date TIMESTAMPTZ DEFAULT current_timestamp,
+                        is_vip_purchase BOOLEAN DEFAULT FALSE
+                    );
+                ''')
+                # Tabela para desconto global
+                await conn.execute('''
+                    CREATE TABLE IF NOT EXISTS discount (
+                        id INT PRIMARY KEY,
+                        percentage NUMERIC(5, 2) NOT NULL
+                    );
+                ''')
+            print("Tabelas do banco de dados verificadas/criadas.")
 
-transactions = Table(
-    'transactions', metadata,
-    Column('id', Integer, primary_key=True),
-    Column('user_id', BigInteger, nullable=False),
-    Column('user_name', String(100)),
-    Column('channel_id', BigInteger),
-    Column('product_name', String(255), nullable=False),
-    Column('price', Float, nullable=False),
-    Column('gamepass_link', String(255), nullable=True),
-    Column('review_rating', Integer, nullable=True),
-    Column('review_text', String(1024), nullable=True),
-    Column('handler_admin_id', BigInteger, nullable=True),
-    Column('delivery_admin_id', BigInteger, nullable=True),
-    Column('payment_method', String(50), default='PIX'),
-    Column('timestamp', DateTime, default=datetime.utcnow),
-    Column('closed_at', DateTime, nullable=True),
-    Column('is_archived', Boolean, default=False, nullable=False)
-)
-
-async def init_db():
-    async with engine.begin() as conn:
-        await conn.run_sync(metadata.create_all)
-    logging.info("Tabelas do banco de dados verificadas e prontas.")
+async def setup(bot):
+    await bot.add_cog(Database(bot))
