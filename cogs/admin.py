@@ -6,10 +6,14 @@ from discord import app_commands
 from datetime import datetime, timedelta
 import logging
 import asyncio
-import math # Adicionado para o cálculo da gamepass
+import math
 from config import *
 import database
+from sqlalchemy import insert, select, update
 from cogs.cliente import CustomerAreaView
+
+# NOVO: Grupo de comandos para cupons
+cupom_group = app_commands.Group(name="cupom", description="Gerenciamento de cupons de desconto.")
 
 class Admin(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -18,6 +22,81 @@ class Admin(commands.Cog):
 
     def cog_unload(self):
         self.cleanup_loop.cancel()
+
+    # --- COMANDOS DE CUPOM ---
+    @cupom_group.command(name="criar", description="Cria um novo cupom de desconto.")
+    @app_commands.checks.has_role(ADMIN_ROLE_ID)
+    @app_commands.describe(codigo="O código do cupom (ex: BEMVINDO10)", desconto="A porcentagem de desconto (ex: 10 para 10%)")
+    async def criar_cupom(self, interaction: discord.Interaction, codigo: str, desconto: int):
+        await interaction.response.defer(ephemeral=True)
+        codigo = codigo.upper()
+
+        if not (0 < desconto <= 100):
+            await interaction.followup.send("A porcentagem de desconto deve ser entre 1 e 100.", ephemeral=True)
+            return
+
+        try:
+            async with database.engine.connect() as conn:
+                query = select(database.coupons).where(database.coupons.c.code == codigo)
+                exists = (await conn.execute(query)).first()
+                if exists:
+                    await interaction.followup.send(f"❌ O cupom `{codigo}` já existe.", ephemeral=True)
+                    return
+                
+                insert_query = insert(database.coupons).values(code=codigo, discount_percentage=desconto)
+                await conn.execute(insert_query)
+                await conn.commit()
+            
+            await interaction.followup.send(f"✅ Cupom `{codigo}` de **{desconto}% de desconto** criado com sucesso!", ephemeral=True)
+        except Exception as e:
+            logging.error(f"Erro ao criar cupom: {e}")
+            await interaction.followup.send("Ocorreu um erro ao tentar criar o cupom.", ephemeral=True)
+
+
+    @cupom_group.command(name="listar", description="Lista todos os cupons ativos.")
+    @app_commands.checks.has_role(ADMIN_ROLE_ID)
+    async def listar_cupons(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            async with database.engine.connect() as conn:
+                query = select(database.coupons).where(database.coupons.c.is_active == True)
+                active_coupons = (await conn.execute(query)).fetchall()
+
+            if not active_coupons:
+                await interaction.followup.send("Não há nenhum cupom ativo no momento.", ephemeral=True)
+                return
+            
+            embed = discord.Embed(title="🎟️ Cupons de Desconto Ativos", color=ROSE_COLOR)
+            description = ""
+            for coupon in active_coupons:
+                description += f"**Código:** `{coupon.code}` - **Desconto:** {coupon.discount_percentage}%\n"
+            embed.description = description
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+        except Exception as e:
+            logging.error(f"Erro ao listar cupons: {e}")
+            await interaction.followup.send("Ocorreu um erro ao tentar listar os cupons.", ephemeral=True)
+
+    @cupom_group.command(name="desativar", description="Desativa um cupom para que não possa mais ser usado.")
+    @app_commands.checks.has_role(ADMIN_ROLE_ID)
+    @app_commands.describe(codigo="O código do cupom a ser desativado.")
+    async def desativar_cupom(self, interaction: discord.Interaction, codigo: str):
+        await interaction.response.defer(ephemeral=True)
+        codigo = codigo.upper()
+        try:
+            async with database.engine.connect() as conn:
+                query = update(database.coupons).where(database.coupons.c.code == codigo).values(is_active=False)
+                result = await conn.execute(query)
+                await conn.commit()
+
+            if result.rowcount > 0:
+                await interaction.followup.send(f"✅ O cupom `{codigo}` foi desativado com sucesso.", ephemeral=True)
+            else:
+                await interaction.followup.send(f"❌ Não encontrei um cupom ativo com o código `{codigo}`.", ephemeral=True)
+
+        except Exception as e:
+            logging.error(f"Erro ao desativar cupom: {e}")
+            await interaction.followup.send("Ocorreu um erro ao tentar desativar o cupom.", ephemeral=True)
 
     @tasks.loop(hours=6)
     async def cleanup_loop(self):
@@ -32,9 +111,7 @@ class Admin(commands.Cog):
                     database.transactions.c.is_archived == False
                 )
                 old_tickets_to_delete = (await conn.execute(query)).fetchall()
-                
                 transcript_channel = self.bot.get_channel(TRANSCRIPT_CHANNEL_ID)
-
                 for ticket in old_tickets_to_delete:
                     channel_id = ticket.channel_id
                     if not channel_id: continue
@@ -46,7 +123,6 @@ class Admin(commands.Cog):
                                 await transcript_channel.send(f"🗑️ O ticket `entregue-{ticket.user_name}` (ID: {channel_id}) foi deletado automaticamente.")
                         except Exception as e:
                             logging.error(f"Erro ao deletar o canal {channel_id}: {e}")
-                    
                     update_query = database.transactions.update().where(database.transactions.c.id == ticket.id).values(is_archived=True)
                     await conn.execute(update_query)
                 await conn.commit()
@@ -57,41 +133,6 @@ class Admin(commands.Cog):
     @cleanup_loop.before_loop
     async def before_cleanup(self):
         await self.bot.wait_until_ready()
-
-    # --- NOVOS COMANDOS UTILITÁRIOS ---
-    @app_commands.command(name="pix", description="[Admin] Envia as informações de pagamento Pix no canal.")
-    @app_commands.guilds(discord.Object(id=GUILD_ID))
-    @app_commands.checks.has_role(ADMIN_ROLE_ID)
-    async def pix(self, interaction: discord.Interaction):
-        pix_embed = discord.Embed(title="Pagamento via PIX", description="Use o QR Code acima ou a chave PIX (E-mail) enviada abaixo para efetuar o pagamento.", color=ROSE_COLOR)
-        pix_embed.set_footer(text="Após pagar, por favor, envie o comprovante neste chat.")
-        pix_embed.set_image(url=QR_CODE_URL)
-        await interaction.response.send_message(embed=pix_embed)
-        await interaction.channel.send(PIX_KEY_MANUAL)
-
-    @app_commands.command(name="tutorialgamepass", description="[Admin] Envia o tutorial e o cálculo da Game Pass.")
-    @app_commands.guilds(discord.Object(id=GUILD_ID))
-    @app_commands.checks.has_role(ADMIN_ROLE_ID)
-    @app_commands.describe(robux="A quantidade de Robux que o cliente irá receber.")
-    async def tutorial_gamepass(self, interaction: discord.Interaction, robux: int):
-        if robux <= 0:
-            await interaction.response.send_message("A quantidade de Robux deve ser positiva.", ephemeral=True)
-            return
-        
-        gamepass_value = math.ceil(robux / 0.7)
-        embed = discord.Embed(
-            title="📄 Tutorial e Cálculo da Game Pass",
-            description=(
-                f"Para receber **{robux} Robux**, é preciso criar uma Game Pass no valor de **{gamepass_value} Robux**.\n\n"
-                f"Assista a este vídeo tutorial para aprender como fazer:\n{TUTORIAL_GAMEPASS_URL}\n\n"
-                "**Importante:** Ao criar, **NÃO** marque a opção de preços regionais."
-            ),
-            color=ROSE_COLOR
-        )
-        await interaction.response.send_message(embed=embed)
-
-
-    # --- COMANDOS EXISTENTES ---
 
     @app_commands.command(name="atender", description="[Admin] Libera o chat para o admin e renomeia o canal.")
     @app_commands.guilds(discord.Object(id=GUILD_ID))
@@ -104,7 +145,7 @@ class Admin(commands.Cog):
             try:
                 await channel.set_permissions(admin_user, send_messages=True)
                 await channel.edit(name=f"atendido-{admin_user.name.split('#')[0]}")
-                response_message = f"Olá! {admin_user.mention} está assumindo o seu atendimento a partir de agora."
+                response_message = f"Olá! {admin_user.mention} está assumindo o seu atendimento."
                 if not interaction.response.is_done():
                     await interaction.response.send_message(response_message, allowed_mentions=discord.AllowedMentions(users=True))
                 else:
@@ -245,4 +286,5 @@ class Admin(commands.Cog):
         await channel.delete(reason="Fechado manualmente por um admin.")
 
 async def setup(bot: commands.Bot):
+    bot.tree.add_command(cupom_group, guild=discord.Object(id=GUILD_ID))
     await bot.add_cog(Admin(bot))
