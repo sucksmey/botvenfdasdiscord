@@ -14,6 +14,7 @@ ROBUX_DELIVERY_USER_ID = 314200274933907456
 
 # --- Configurações de Pagamento ---
 PIX_KEY_MANUAL = "israbuyshop@gmail.com"
+VIP_PRICE = 6.00 # PREÇO DO VIP ATUALIZADO
 
 # --- Produtos e Preços ---
 PRODUCTS = {
@@ -31,7 +32,7 @@ PRODUCTS = {
     "Genshin Impact": {"emoji": "🌈", "prices": {"60 Cristal Gênesis": 8.03, "330 Cristal Gênesis": 28.72, "Bênção da Lua Nova": 28.72, "1090 Cristal Gênesis": 80.41, "2240 Cristal Gênesis": 170.84, "3880 Cristal Gênesis": 261.27, "8080 Cristal Gênesis": 519.62}},
     "Honkai Star Rail": {"emoji": "✨", "prices": {"60 Fragmentos Oníricos": 6.90, "330 Fragmentos Oníricos": 26.90, "Express Supply Pass": 26.90, "2240 Fragmentos Oníricos": 151.90, "3880 Fragmentos Oníricos": 251.90, "8080 Fragmentos Oníricos": 501.90}},
     "Honor of Kings": {"emoji": "👑", "prices": {"88 Fichas": 7.69, "Pase Semanal": 7.75, "257 Fichas": 19.19, "Pase Semanal Plus": 19.19, "432 Fichas": 30.68, "605 Fichas": 42.18, "865 Fichas": 59.43, "1308 Fichas": 88.17, "2616 Fichas": 174.39, "4580 Fichas": 289.36, "9160 Fichas": 576.77}},
-    "Marvel Rivals": {"emoji": "🦸", "prices": {"100 TRELIÇAS": 5.90, "500 TRELIÇAS": 25.50, "1000 TRELIÇAS": 50.00, "2180 TRELIÇAS": 99.00, "5680 TRELIÇAS": 246.00, "11680 TRELIÇAS": 491.00}},
+    "Marvel Rivals": {"emoji": "🦸", "prices": {"100 TRELIÇAS": 5.90, "500 TRELIÇAS": 25.50, "1000 TRELIÇAS": 50.00, "2180 TRELIÇAS": 9.00, "5680 TRELIÇAS": 246.00, "11680 TRELIÇAS": 491.00}},
     "Google Play": {"emoji": "📱", "prices": {"R$16.90": 17.90, "R$30": 31.00, "R$40": 41.00, "R$50": 51.00, "R$70": 71.00, "R$80": 81.00, "R$100": 101.00, "R$139.90": 140.90, "R$250": 251.00}},
     "Xbox Fortnite": {"emoji": "🕹️", "prices": {"Pacote Lendas Menta (Xbox)": 100.00}},
     "Apple": {"emoji": "🍎", "prices": {"R$20": 22.00, "R$50": 52.00, "R$150": 152.00, "R$200": 202.00}},
