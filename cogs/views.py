@@ -89,11 +89,11 @@ class VIPPanelView(discord.ui.View):
         
         # Envia mensagem no ticket
         vip_price = 49.90 # Preço fixo, ajuste se necessário
-        embed_pix, file_pix = await generate_pix_embed(vip_price)
+        embed_pix = await generate_pix_embed(vip_price)
         await ticket_channel.send(
             f"Olá {interaction.user.mention}! Bem-vindo ao seu ticket de compra VIP.\n"
             f"O valor da assinatura é **R$ {vip_price:.2f}**.",
-            embed=embed_pix, file=file_pix
+            embed=embed_pix
         )
 
 
@@ -177,15 +177,16 @@ class PurchaseConfirmView(discord.ui.View):
         
         # Armazena os dados do ticket
         tickets_cog = self.bot.get_cog("Tickets")
-        tickets_cog.ticket_data[ticket_channel.id] = {'product': self.product, 'price': self.price}
+        if tickets_cog:
+            tickets_cog.ticket_data[ticket_channel.id] = {'product': self.product, 'price': self.price}
         
         await interaction.followup.send(f"Seu ticket foi criado em {ticket_channel.mention}!", ephemeral=True)
         
         # Envia PIX no ticket
-        embed_pix, file_pix = await generate_pix_embed(self.price)
+        embed_pix = await generate_pix_embed(self.price)
         await ticket_channel.send(
             f"Olá {interaction.user.mention}! Você está comprando **{self.product}**.",
-            embed=embed_pix, file=file_pix
+            embed=embed_pix
         )
 
 
