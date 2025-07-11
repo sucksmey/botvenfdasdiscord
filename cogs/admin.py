@@ -133,8 +133,7 @@ class Admin(commands.Cog):
     @app_commands.describe(robux="A quantidade de Robux que o cliente irá receber.")
     async def tutorial_gamepass(self, interaction: discord.Interaction, robux: int):
         if robux <= 0:
-            await interaction.response.send_message("A quantidade de Robux deve ser positiva.", ephemeral=True)
-            return
+            await interaction.response.send_message("A quantidade de Robux deve ser positiva.", ephemeral=True); return
         gamepass_value = math.ceil(robux / 0.7)
         embed = discord.Embed(title="📄 Tutorial e Cálculo da Game Pass", description=f"Para receber **{robux} Robux**, é preciso criar uma Game Pass no valor de **{gamepass_value} Robux**.\n\nAssista a este vídeo tutorial para aprender como fazer:\n{TUTORIAL_GAMEPASS_URL}\n\n**Importante:** Ao criar, **NÃO** marque a opção de preços regionais.", color=ROSE_COLOR)
         await interaction.response.send_message(embed=embed)
@@ -149,13 +148,10 @@ class Admin(commands.Cog):
             try:
                 await channel.set_permissions(admin_user, send_messages=True)
                 await channel.edit(name=f"atendido-{admin_user.name.split('#')[0]}")
-                response_message = f"Olá! {admin_user.mention} está assumindo o seu atendimento a partir de agora."
-                if not interaction.response.is_done():
-                    await interaction.response.send_message(response_message, allowed_mentions=discord.AllowedMentions(users=True))
-                else:
-                    await interaction.followup.send(response_message, allowed_mentions=discord.AllowedMentions(users=True))
-                if channel.id in ONGOING_SALES_DATA:
-                    ONGOING_SALES_DATA[channel.id]['handler_admin_id'] = admin_user.id
+                response_message = f"Olá! {admin_user.mention} está assumindo o seu atendimento."
+                if not interaction.response.is_done(): await interaction.response.send_message(response_message, allowed_mentions=discord.AllowedMentions(users=True))
+                else: await interaction.followup.send(response_message, allowed_mentions=discord.AllowedMentions(users=True))
+                if channel.id in ONGOING_SALES_DATA: ONGOING_SALES_DATA[channel.id]['handler_admin_id'] = admin_user.id
             except Exception as e:
                 logging.error(f"Falha ao atender o ticket {channel.id}: {e}")
                 if not interaction.response.is_done(): await interaction.response.send_message("Ocorreu um erro.", ephemeral=True)
@@ -191,18 +187,13 @@ class Admin(commands.Cog):
                         try:
                             corrected_valor = float(valor.replace(',', '.'))
                             ticket_data = {'client_id': client_id, 'item_name': produto, 'final_price': corrected_valor}
-                        except ValueError:
-                            await interaction.followup.send("⚠️ O valor manual que você inseriu não é um número válido.", ephemeral=True); return
-                    else:
-                        await interaction.followup.send("⚠️ O bot esqueceu os detalhes. Use `/aprovar` com `produto` e `valor`.", ephemeral=True); return
-                except (IndexError, ValueError):
-                     await interaction.followup.send("❌ Não foi possível recuperar o cliente.", ephemeral=True); return
-            else:
-                await interaction.followup.send("❌ Não é um ticket válido.", ephemeral=True); return
+                        except ValueError: await interaction.followup.send("⚠️ O valor manual que você inseriu não é um número válido.", ephemeral=True); return
+                    else: await interaction.followup.send("⚠️ O bot esqueceu os detalhes. Use `/aprovar` com `produto` e `valor`.", ephemeral=True); return
+                except (IndexError, ValueError): await interaction.followup.send("❌ Não foi possível recuperar o cliente.", ephemeral=True); return
+            else: await interaction.followup.send("❌ Não é um ticket válido.", ephemeral=True); return
         client_id = ticket_data.get("client_id")
         membro = interaction.guild.get_member(client_id)
-        if not membro:
-            await interaction.followup.send(f"Não foi possível encontrar o membro com ID {client_id}.", ephemeral=True); return
+        if not membro: await interaction.followup.send(f"Não foi possível encontrar o membro com ID {client_id}.", ephemeral=True); return
         final_product_name = ticket_data.get("item_name", "N/A")
         final_price = ticket_data.get("final_price", 0.0)
         try:
@@ -274,6 +265,19 @@ class Admin(commands.Cog):
         await interaction.response.send_message("Este canal será **deletado permanentemente** em 5 segundos...", ephemeral=True)
         await asyncio.sleep(5)
         await channel.delete(reason="Fechado manualmente por um admin.")
+    
+    @app_commands.command(name="sync", description="[Admin] Força a sincronização dos comandos com o Discord.")
+    @app_commands.guilds(discord.Object(id=GUILD_ID))
+    @app_commands.checks.has_role(ADMIN_ROLE_ID)
+    async def sync(self, interaction: discord.Interaction):
+        await interaction.response.send_message("Sincronizando comandos...", ephemeral=True)
+        try:
+            synced = await self.bot.tree.sync(guild=discord.Object(id=GUILD_ID))
+            await interaction.followup.send(f"Sincronizados {len(synced)} comandos com este servidor.", ephemeral=True)
+            logging.info(f"Sincronização manual forçada por {interaction.user}. Sincronizados {len(synced)} comandos.")
+        except Exception as e:
+            logging.error(f"Falha na sincronização manual: {e}")
+            await interaction.followup.send(f"Falha ao sincronizar: {e}", ephemeral=True)
 
 async def setup(bot: commands.Bot):
     bot.tree.add_command(cupom_group, guild=discord.Object(id=GUILD_ID))
