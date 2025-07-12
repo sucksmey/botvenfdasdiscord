@@ -34,12 +34,12 @@ class IsrabuyBot(commands.Bot):
             print(f"Erro ao conectar com o banco de dados: {e}")
             return
 
-        # CORREÇÃO: Removido 'cogs.helpers' e 'cogs.views' da lista
         initial_extensions = [
             'cogs.database',
             'cogs.admin',
             'cogs.tickets',
-            'cogs.advertising'
+            'cogs.advertising',
+            'cogs.ai_assistant' # <-- ADICIONA A NOVA COG DE IA
         ]
         
         for extension in initial_extensions:
