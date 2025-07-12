@@ -4,7 +4,7 @@ from discord.ext import commands
 import config
 import traceback
 import re
-from .helpers import get_discount_info, apply_discount, generate_pix_embed
+from .helpers import apply_discount, generate_pix_embed
 from datetime import timedelta
 
 # --- Modals ---
@@ -227,8 +227,10 @@ class PurchaseConfirmView(discord.ui.View):
         try:
             for item in self.children: item.disabled = True
             await interaction.response.edit_message(content="Abrindo seu ticket...", view=None)
-            discount_info = await get_discount_info(self.bot.pool)
-            final_price, was_discounted = await apply_discount(self.member, self.category, self.price, discount_info)
+
+            # Lógica de desconto atualizada para ser fixa e automática
+            final_price, was_discounted = await apply_discount(self.member, self.category, self.price)
+            
             async with self.bot.pool.acquire() as conn:
                 purchase_id = await conn.fetchval(
                     "INSERT INTO purchases (user_id, product_name, product_price) VALUES ($1, $2, $3) RETURNING id",
@@ -243,6 +245,7 @@ class PurchaseConfirmView(discord.ui.View):
             }
             channel_name_prefix = "robux" if self.category == "Robux" else "geral"
             ticket_channel = await guild.create_text_channel(name=f"ticket-{channel_name_prefix}-{self.member.name}-{self.member.id}", category=category_channel, overwrites=overwrites)
+            
             tickets_cog = self.bot.get_cog("Tickets")
             if tickets_cog:
                 ticket_payload = {'product': self.product, 'price': final_price, 'purchase_id': purchase_id}
@@ -253,14 +256,16 @@ class PurchaseConfirmView(discord.ui.View):
                     except (ValueError, AttributeError):
                         pass
                 tickets_cog.ticket_data[ticket_channel.id] = ticket_payload
+            
             payment_view = PaymentMethodView(self.bot, self.product, final_price, self.price, was_discounted)
             await ticket_channel.send(f"Olá {self.member.mention}!", embed=discord.Embed(description=payment_view.initial_message, color=0x36393F), view=payment_view)
+            
             await interaction.edit_original_response(content=f"Ticket criado: {ticket_channel.mention}", view=None)
+        
         except Exception as e:
             traceback.print_exc()
             error_message = f"😕 Ocorreu um erro ao criar o ticket.\n**Causa provável:** O bot não tem permissão para criar canais nesta categoria.\n\n**Erro técnico:** `{str(e)}`"
             await interaction.edit_original_response(content=error_message, view=None)
-
 
 class VIPPanelView(discord.ui.View):
     def __init__(self, bot):
