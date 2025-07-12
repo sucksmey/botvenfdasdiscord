@@ -18,25 +18,31 @@ class Tickets(commands.Cog):
             return
 
         channel_name = message.channel.name.lower()
-        # Garante que estamos em um canal de ticket válido antes de prosseguir
-        if not ("ticket-robux" in channel_name or "ticket-geral" in channel_name):
+        
+        # --- CORREÇÃO APLICADA AQUI ---
+        # Agora verifica se o canal começa com "ticket-" OU "atendido-"
+        if not (channel_name.startswith("ticket-") or channel_name.startswith("atendido-")):
             return
 
-        # 1. Fluxo para tickets de Robux
-        if "ticket-robux" in channel_name:
-            ticket_info = self.ticket_data.get(message.channel.id, {})
-            robux_amount = ticket_info.get('robux_amount', 0)
+        # O fluxo de Robux só deve ser acionado em canais de robux
+        # O nome original (ticket-robux-...) é preservado mesmo após renomear para atendido- a nível de ID e objeto
+        # Uma verificação mais segura seria por dados armazenados, mas por nome é mais simples.
+        # Vamos assumir que se o admin atendeu, ele sabe o contexto.
 
-            # Detecta comprovante (qualquer anexo)
-            if message.attachments:
-                view = GamepassCheckView(robux_amount=robux_amount)
-                await message.channel.send(
-                    f"{message.author.mention}, nós entregamos por Gamepass. Você já sabe criar a gamepass?",
-                    view=view
-                )
-                return
+        ticket_info = self.ticket_data.get(message.channel.id, {})
+        robux_amount = ticket_info.get('robux_amount', 0)
 
-            # Detecta link de gamepass
+        # 1. Detecta comprovante (qualquer anexo)
+        if message.attachments and robux_amount > 0: # Só aciona o fluxo de gamepass se for uma compra de robux
+            view = GamepassCheckView(robux_amount=robux_amount)
+            await message.channel.send(
+                f"{message.author.mention}, nós entregamos por Gamepass. Você já sabe criar a gamepass?",
+                view=view
+            )
+            return
+
+        # 2. Detecta link de gamepass
+        if robux_amount > 0: # Só aciona o fluxo de gamepass se for uma compra de robux
             match = re.search(r'(?:game-pass/|)(\d{8,})', message.content)
             if match:
                 from .views import RegionalPricingCheckView
@@ -55,9 +61,13 @@ class Tickets(commands.Cog):
     @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
     async def atender(self, interaction: discord.Interaction):
         channel = interaction.channel
-        if "ticket-" in channel.name or "vip-" in channel.name:
+        if channel.name.startswith("ticket-") or channel.name.startswith("vip-"):
+            # Renomeia o canal mantendo o ID do cliente para referência futura
+            original_name_parts = channel.name.split('-')
+            customer_id = original_name_parts[-1]
+            new_name = f"atendido-{interaction.user.name}-{customer_id}"
+
             await channel.set_permissions(interaction.user, send_messages=True, read_messages=True)
-            new_name = f"atendido-{interaction.user.name}"
             await channel.edit(name=new_name)
             
             if channel.id not in self.ticket_data:
@@ -68,11 +78,9 @@ class Tickets(commands.Cog):
         else:
             await interaction.response.send_message("Este comando só pode ser usado em um canal de ticket.", ephemeral=True)
 
-    # --- COMANDOS CORRIGIDOS ---
     @app_commands.command(name="tutorialgamepass", description="Calcula o valor que a Game Pass deve ter (inclui taxa de 30%).")
     @app_commands.describe(robux="A quantidade de Robux que você quer RECEBER.")
     async def tutorial_gamepass(self, interaction: discord.Interaction, robux: int):
-        # CORREÇÃO: Cálculo e texto ajustados
         gamepass_value = int((robux / 0.7) + 0.99)
         await interaction.response.send_message(
             f"Para você receber `{robux}` Robux, a Game Pass precisa ser criada com o valor de **{gamepass_value} Robux** (para cobrir a taxa de 30% do Roblox).\nSiga o tutorial abaixo para criar a Game Pass corretamente.",
@@ -82,7 +90,6 @@ class Tickets(commands.Cog):
     @app_commands.command(name="calculadora", description="Calcula o valor de uma Game Pass para receber uma quantia de Robux.")
     @app_commands.describe(robux="A quantidade de Robux que você quer RECEBER.")
     async def calculadora(self, interaction: discord.Interaction, robux: int):
-        # CORREÇÃO: Cálculo e texto ajustados
         gamepass_value = int((robux / 0.7) + 0.99)
         await interaction.response.send_message(f"Para receber `{robux}` Robux, a Game Pass deve ser de **{gamepass_value} Robux**.", ephemeral=True)
 
