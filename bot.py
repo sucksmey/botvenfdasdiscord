@@ -39,7 +39,8 @@ class IsrabuyBot(commands.Bot):
             'cogs.admin',
             'cogs.tickets',
             'cogs.advertising',
-            'cogs.ai_assistant' # <-- ADICIONA A NOVA COG DE IA
+            'cogs.ai_assistant',
+            'cogs.status_manager' # <-- ADICIONA A NOVA COG DE STATUS
         ]
         
         for extension in initial_extensions:
