@@ -3,6 +3,8 @@ import discord
 from discord.ext import commands
 import config
 import json
+import os
+import google.generativeai as genai
 
 # O ID do canal onde a IA irá responder
 AI_CHANNEL_ID = 1393593539908337734
@@ -13,13 +15,21 @@ class AIAssistant(commands.Cog):
         # Transforma o dicionário de produtos em uma string JSON para usar como contexto
         self.product_context = json.dumps(config.PRODUCTS, indent=2, ensure_ascii=False)
 
+        # --- CONFIGURAÇÃO DA API DO GEMINI ---
+        GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+        if not GEMINI_API_KEY:
+            print("AVISO: Chave da API do Gemini (GEMINI_API_KEY) não encontrada. A IA não funcionará.")
+            self.model = None
+        else:
+            genai.configure(api_key=GEMINI_API_KEY)
+            # Usando o modelo Flash, que é rápido e eficiente
+            self.model = genai.GenerativeModel('gemini-1.5-flash-latest')
+
     def get_ai_prompt(self, user_question: str) -> str:
         """
-        Monta o prompt que será enviado para a "IA".
-        Ele inclui as regras, o contexto dos produtos e a pergunta do usuário.
+        Monta o prompt que será enviado para a IA.
         """
-        
-        prompt = f"""
+        return f"""
         Você é "Israbuy", um assistente de vendas amigável e prestativo de uma loja de créditos para jogos online.
         Sua personalidade é moderna, atenciosa e você adora usar emojis para deixar a conversa mais leve.
         Responda APENAS a perguntas relacionadas aos produtos da loja. Se a pergunta for sobre qualquer outra coisa (como programação, o tempo, etc.), recuse educadamente dizendo que você só pode ajudar com dúvidas sobre os produtos.
@@ -30,7 +40,7 @@ class AIAssistant(commands.Cog):
         ```
 
         **Regras Importantes:**
-        1.  Seja sempre amigável e use emojis.
+        1.  Seja sempre amigável e use emojis. 😊
         2.  Suas respostas devem ser curtas e diretas.
         3.  Baseie suas respostas **estritamente** nas informações do contexto JSON acima. Não invente produtos ou preços.
         4.  Quando mencionar preços, sempre use "R$".
@@ -41,65 +51,30 @@ class AIAssistant(commands.Cog):
 
         **Sua Resposta (como Israbuy):**
         """
-        return prompt
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        # Ignora mensagens de bots (incluindo a si mesmo) e fora do canal de IA
-        if message.author.bot or message.channel.id != AI_CHANNEL_ID:
+        # Ignora mensagens de bots, fora do canal de IA ou respostas
+        if message.author.bot or message.channel.id != AI_CHANNEL_ID or message.reference:
+            return
+        
+        # Verifica se o modelo de IA foi carregado corretamente
+        if not self.model:
             return
 
-        # Para evitar loops, ignora mensagens que são respostas a outras mensagens
-        if message.reference:
-            return
-
-        # Monta o prompt para a IA
         prompt = self.get_ai_prompt(message.content)
 
-        # --- SIMULAÇÃO DA CHAMADA DA IA ---
-        # Em um bot real, aqui você faria uma chamada para uma API de IA (como a do GPT, Gemini, etc.)
-        # Para este exemplo, vamos criar uma resposta simulada baseada em palavras-chave.
-        # Esta é a parte que você substituiria por uma integração real no futuro.
-        
         async with message.channel.typing():
-            # Lógica de IA Simulada (pode ser substituída por uma API real)
-            response_text = "Olá! 😊 Parece que você tem uma dúvida. Deixe-me ver como posso ajudar..."
+            try:
+                # --- CHAMADA REAL À API DO GEMINI ---
+                response = await self.model.generate_content_async(prompt)
+                
+                # Responde mencionando o usuário
+                await message.reply(response.text)
             
-            user_question_lower = message.content.lower()
-
-            if "robux" in user_question_lower:
-                robux_prices = config.PRODUCTS.get("Robux", {}).get("prices", {})
-                if robux_prices:
-                    response_text = "Claro! Nós temos vários pacotes de Robux! 💎\n\n"
-                    for item, price in robux_prices.items():
-                        response_text += f"• **{item}**: R$ {price:.2f}\n"
-                else:
-                    response_text = "Hmm, não encontrei informações sobre Robux no momento. 🤔"
-            
-            elif "valorant" in user_question_lower:
-                vp_prices = config.PRODUCTS.get("Valorant", {}).get("prices", {})
-                if vp_prices:
-                    response_text = "Opa! Temos sim Valorant Points! 💢 Aqui estão nossos pacotes:\n\n"
-                    for item, price in vp_prices.items():
-                        response_text += f"• **{item}**: R$ {price:.2f}\n"
-                else:
-                    response_text = "Não achei os preços de Valorant Points agora, desculpe! 😥"
-
-            elif "free fire" in user_question_lower or "dima" in user_question_lower:
-                ff_prices = config.PRODUCTS.get("Free Fire", {}).get("prices", {})
-                if ff_prices:
-                    response_text = "Temos Dimas para Free Fire, sim! 🔥 Confira os pacotes:\n\n"
-                    for item, price in ff_prices.items():
-                        response_text += f"• **{item}**: R$ {price:.2f}\n"
-                else:
-                    response_text = "Puxa, não encontrei os pacotes de Free Fire. 😕"
-            
-            # Se não for uma pergunta sobre os produtos, recusa educadamente.
-            elif len(user_question_lower) > 25 and not any(game.lower() in user_question_lower for game in config.PRODUCTS.keys()):
-                 response_text = "Olá! 👋 Eu sou a Israbuy, assistente de vendas. No momento, só consigo ajudar com dúvidas sobre os produtos da nossa loja. Como posso te ajudar com isso?"
-
-            # Responde mencionando o usuário
-            await message.reply(response_text)
+            except Exception as e:
+                print(f"Erro ao chamar a API do Gemini: {e}")
+                await message.reply("Ops! 😥 Parece que minha conexão com a inteligência artificial falhou. Tente novamente em um instante.")
 
 async def setup(bot):
     await bot.add_cog(AIAssistant(bot))
