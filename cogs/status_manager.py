@@ -4,10 +4,9 @@ from discord.ext import commands, tasks
 import itertools
 import config
 
-# --- Lista de Mensagens para o Status ---
-# O bot irá alternar entre essas mensagens.
+# --- Lista de Mensagens para o Status (Texto ATUALIZADO) ---
 STATUS_MESSAGES = [
-    f"Desenvolvido por <@{config.ROBUX_DELIVERY_USER_ID}>",
+    "Desenvolvido por edos.",
     "Robux mais barato aqui!",
     "Dimas tá quase de graça aqui!",
     "Valorant Points e Muito Mais!",
