@@ -11,24 +11,19 @@ class BackfillConfirmView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=60)
         self.confirmed = False
-
     @discord.ui.button(label="Sim, tenho certeza", style=discord.ButtonStyle.danger)
     async def confirm_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.confirmed = True
-        for item in self.children:
-            item.disabled = True
+        for item in self.children: item.disabled = True
         await interaction.response.edit_message(content="✅ Confirmado! Iniciando o preenchimento dos logs...", view=self)
         self.stop()
 
 class ReviewModal(discord.ui.Modal, title="Avalie nosso Atendimento"):
     def __init__(self, bot, customer_id, admin_id):
         super().__init__()
-        self.bot = bot
-        self.customer_id = customer_id
-        self.admin_id = admin_id
+        self.bot, self.customer_id, self.admin_id = bot, customer_id, admin_id
     nota = discord.ui.TextInput(label="Nota (de 1 a 10)", placeholder="Sua nota sincera.", min_length=1, max_length=2, required=True)
     descricao = discord.ui.TextInput(label="Descrição da Avaliação (Opcional)", style=discord.TextStyle.long, placeholder="Deixe seu comentário aqui!", required=False)
-
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         review_channel = self.bot.get_channel(config.REVIEW_CHANNEL_ID)
@@ -52,7 +47,6 @@ class ReviewView(discord.ui.View):
     def __init__(self, bot, purchase_id, customer_id, admin_id):
         super().__init__(timeout=None)
         self.bot, self.purchase_id, self.customer_id, self.admin_id = bot, purchase_id, customer_id, admin_id
-
     @discord.ui.button(label="⭐ Avaliar Compra", style=discord.ButtonStyle.success, custom_id="review_purchase_button")
     async def review_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.customer_id:
@@ -83,7 +77,7 @@ class GamepassCheckView(discord.ui.View):
     async def nao_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         for item in self.children: item.disabled = True
         gamepass_value = int((self.robux_amount / 0.7) + 0.99)
-        description = (f"Siga os passos no vídeo para criar sua Game Pass corretamente.\n\n**IMPORTANTE:** Você deve criar a Game Pass com o valor de **`{gamepass_value}` Robux** para receber a quantia correta.\n\nLembre-se também de **DESATIVAR** os preços regionais. Após criar, envie o link ou ID dela aqui no chat.")
+        description = (f"Siga os passos no vídeo para criar sua Game Pass corretamente.\n\n**IMPORTANTE:** Você deve criar a Game Pass com o valor de **`{gamepass_value}` Robux**.\n\nLembre-se também de **DESATIVAR** os preços regionais. Após criar, envie o link ou ID dela aqui no chat.")
         tutorial_embed = discord.Embed(title="Tutorial - Criando uma Game Pass", description=description, color=discord.Color.blue())
         tutorial_embed.add_field(name="Link do Tutorial", value="[Clique aqui para assistir](http://www.youtube.com/watch?v=B-LQU3J24pI)")
         await interaction.response.edit_message(content="", embed=tutorial_embed, view=self)
@@ -113,7 +107,6 @@ class GameSelectionView(discord.ui.View):
     def __init__(self, bot, number_amount: int, original_message: discord.Message):
         super().__init__(timeout=120)
         self.bot, self.number_amount, self.original_message = bot, number_amount, original_message
-
     async def create_ticket_and_cleanup(self, interaction: discord.Interaction, category: str):
         product_name, base_price = f"{self.number_amount} {category}", None
         if category == "Robux":
@@ -124,36 +117,35 @@ class GameSelectionView(discord.ui.View):
                     break
         if base_price is None:
             return await interaction.response.send_message(f"Não encontrei um produto exato para `{self.number_amount} {category}`.", ephemeral=True)
-        
         for item in self.children: item.disabled = True
         await interaction.response.edit_message(content=f"Ok! Criando ticket para `{product_name}`...", view=self)
         try:
-            # --- CORREÇÃO APLICADA AQUI ---
             guild = interaction.guild
             final_price, was_discounted = await apply_discount(interaction.user, category, base_price)
             async with self.bot.pool.acquire() as conn:
-                purchase_id = await conn.fetchval("INSERT INTO purchases (user_id, product_name, product_price) VALUES ($1, $2, $3) RETURNING id", interaction.user.id, product_name, final_price)
+                purchase_id = await conn.fetchval("INSERT INTO purchases (user_id, product_name, product_price, admin_id) VALUES ($1, $2, $3, NULL) RETURNING id", interaction.user.id, product_name, final_price)
             category_channel, overwrites = guild.get_channel(config.CATEGORY_VENDAS_ID), {guild.default_role: discord.PermissionOverwrite(read_messages=False), interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True), guild.get_role(config.ADMIN_ROLE_ID): discord.PermissionOverwrite(read_messages=True)}
             channel_name_prefix = "robux" if category == "Robux" else "geral"
             ticket_channel = await guild.create_text_channel(name=f"ticket-{channel_name_prefix}-{interaction.user.name}-{interaction.user.id}", category=category_channel, overwrites=overwrites)
             tickets_cog = self.bot.get_cog("Tickets")
             if tickets_cog:
-                ticket_payload = {'product': product_name, 'price': final_price, 'purchase_id': purchase_id, 'robux_amount': self.number_amount if category == "Robux" else 0, 'was_discounted': was_discounted}
+                ticket_payload = {'product': product_name, 'price': final_price, 'purchase_id': purchase_id, 'was_discounted': was_discounted, 'robux_amount': self.number_amount if category == "Robux" else 0}
                 tickets_cog.ticket_data[ticket_channel.id] = ticket_payload
             payment_view = PaymentMethodView(self.bot, product_name, final_price, base_price, was_discounted)
-            await ticket_channel.send(f"Olá {interaction.user.mention}!", embed=discord.Embed(description=payment_view.initial_message, color=0x36393F), view=payment_view)
+            initial_ticket_embed = discord.Embed(title=f"Ticket de Compra de {interaction.user.display_name}", description=f"Seu pedido para **{product_name}** foi iniciado.", color=0x5865F2).set_thumbnail(url=interaction.user.display_avatar.url)
+            await ticket_channel.send(f"Olá {interaction.user.mention}!", embed=initial_ticket_embed)
+            await ticket_channel.send(embed=discord.Embed(description=payment_view.initial_message, color=0x36393F), view=payment_view)
             await self.original_message.delete()
             await interaction.message.delete()
         except Exception as e:
             traceback.print_exc()
             await interaction.followup.send(f"😕 Ocorreu um erro ao criar o ticket: `{str(e)}`", ephemeral=True)
-
     @discord.ui.button(label="Robux", style=discord.ButtonStyle.primary, emoji="💎")
     async def robux_button(self, interaction: discord.Interaction, button: discord.ui.Button): await self.create_ticket_and_cleanup(interaction, "Robux")
     @discord.ui.button(label="Valorant", style=discord.ButtonStyle.secondary, emoji="💢")
     async def valorant_button(self, interaction: discord.Interaction, button: discord.ui.Button): await interaction.response.send_message("Atalho para Valorant ainda não implementado.", ephemeral=True)
     @discord.ui.button(label="Outro Jogo", style=discord.ButtonStyle.secondary, emoji="🎮")
-    async def other_button(self, interaction: discord.Interaction, button: discord.ui.Button): await interaction.response.send_message("Para outros jogos, por favor, use o painel de vendas principal.", ephemeral=True)
+    async def other_button(self, interaction: discord.Interaction, button: discord.ui.Button): await interaction.response.send_message("Para outros jogos, por favor, use o painel.", ephemeral=True)
 
 class SalesPanelView(discord.ui.View):
     def __init__(self, bot):
@@ -199,12 +191,10 @@ class PurchaseConfirmView(discord.ui.View):
         try:
             for item in self.children: item.disabled = True
             await interaction.response.edit_message(content="Abrindo seu ticket...", view=None)
-            # --- CORREÇÃO APLICADA AQUI ---
-            guild = interaction.guild
             final_price, was_discounted = await apply_discount(self.member, self.category, self.price)
             async with self.bot.pool.acquire() as conn:
-                purchase_id = await conn.fetchval("INSERT INTO purchases (user_id, product_name, product_price) VALUES ($1, $2, $3) RETURNING id", self.member.id, self.product, final_price)
-            category_channel, overwrites = guild.get_channel(config.CATEGORY_VENDAS_ID), {guild.default_role: discord.PermissionOverwrite(read_messages=False), self.member: discord.PermissionOverwrite(read_messages=True, send_messages=True), guild.get_role(config.ADMIN_ROLE_ID): discord.PermissionOverwrite(read_messages=True)}
+                purchase_id = await conn.fetchval("INSERT INTO purchases (user_id, product_name, product_price, admin_id) VALUES ($1, $2, $3, NULL) RETURNING id", self.member.id, self.product, final_price)
+            guild, category_channel, overwrites = interaction.guild, guild.get_channel(config.CATEGORY_VENDAS_ID), {guild.default_role: discord.PermissionOverwrite(read_messages=False), self.member: discord.PermissionOverwrite(read_messages=True, send_messages=True), guild.get_role(config.ADMIN_ROLE_ID): discord.PermissionOverwrite(read_messages=True)}
             channel_name_prefix = "robux" if self.category == "Robux" else "geral"
             ticket_channel = await guild.create_text_channel(name=f"ticket-{channel_name_prefix}-{self.member.name}-{self.member.id}", category=category_channel, overwrites=overwrites)
             tickets_cog = self.bot.get_cog("Tickets")
@@ -214,12 +204,14 @@ class PurchaseConfirmView(discord.ui.View):
                     try: ticket_payload['robux_amount'] = int(re.search(r'\d+', self.product).group())
                     except (ValueError, AttributeError): pass
                 tickets_cog.ticket_data[ticket_channel.id] = ticket_payload
+            initial_ticket_embed = discord.Embed(title=f"Ticket de Compra de {self.member.display_name}", description=f"Seu pedido para **{self.product}** foi iniciado com sucesso.\nPor favor, aguarde as instruções de pagamento.", color=0x5865F2).set_thumbnail(url=self.member.display_avatar.url)
             payment_view = PaymentMethodView(self.bot, self.product, final_price, self.price, was_discounted)
-            await ticket_channel.send(f"Olá {self.member.mention}!", embed=discord.Embed(description=payment_view.initial_message, color=0x36393F), view=payment_view)
+            await ticket_channel.send(f"Olá {self.member.mention}!", embed=initial_ticket_embed)
+            await ticket_channel.send(embed=discord.Embed(description=payment_view.initial_message, color=0x36393F), view=payment_view)
             await interaction.edit_original_response(content=f"Ticket criado: {ticket_channel.mention}", view=None)
         except Exception as e:
             traceback.print_exc()
-            await interaction.edit_original_response(content=f"😕 Ocorreu um erro ao criar o ticket.\n**Causa provável:** O bot não tem permissão para criar canais.\n**Erro técnico:** `{str(e)}`", view=None)
+            await interaction.edit_original_response(content=f"😕 Ocorreu um erro ao criar o ticket.\n**Erro técnico:** `{str(e)}`", view=None)
 
 class VIPPanelView(discord.ui.View):
     def __init__(self, bot): super().__init__(timeout=None); self.bot = bot
