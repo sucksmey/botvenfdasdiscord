@@ -15,9 +15,8 @@ class Giveaway(commands.Cog):
 
     def cog_unload(self):
         self.update_invite_giveaway_message.cancel()
-
+        
     async def handle_error(self, interaction: discord.Interaction, error: Exception):
-        """Função para lidar com erros e reportá-los ao admin."""
         print(f"Ocorreu um erro em um comando de sorteio:")
         traceback.print_exc()
         error_message = f"😕 Ocorreu um erro ao executar o comando.\n**Detalhe:** `{str(error)}`"
@@ -35,58 +34,70 @@ class Giveaway(commands.Cog):
             print("AVISO: Permissão para ver convites negada. Sorteio por convites não funcionará.")
 
     @commands.Cog.listener()
+    async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
+        if payload.user_id == self.bot.user.id or not payload.guild_id:
+            return
+
+        async with self.bot.pool.acquire() as conn:
+            is_giveaway = await conn.fetchval("SELECT prize FROM giveaways WHERE message_id = $1 AND is_active = TRUE", payload.message_id)
+        
+        if not is_giveaway or str(payload.emoji) != '🎉':
+            return
+        
+        guild = self.bot.get_guild(payload.guild_id)
+        member = guild.get_member(payload.user_id)
+        admin_role = guild.get_role(config.ADMIN_ROLE_ID)
+        
+        if admin_role in member.roles:
+            return
+
+        async with self.bot.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO giveaway_participants (giveaway_message_id, user_id, progress_count)
+                VALUES ($1, $2, 0)
+                ON CONFLICT (giveaway_message_id, user_id) DO NOTHING;
+            """, payload.message_id, payload.user_id)
+
+    @commands.Cog.listener()
     async def on_member_join(self, member):
         if member.guild.id != config.GUILD_ID or member.bot: return
         try:
             invites_after = await member.guild.invites()
             inviter = None
-            
             for invite in self.invites[member.guild.id]:
                 found = discord.utils.get(invites_after, code=invite.code)
                 if found and found.uses > invite.uses:
                     inviter = invite.inviter
                     break
-            
             self.invites[member.guild.id] = invites_after
-
             if inviter:
                 async with self.bot.pool.acquire() as conn:
-                    active_gw = await conn.fetchrow("SELECT message_id FROM giveaways WHERE gw_type = 'invites' AND is_active = TRUE LIMIT 1")
-                    if active_gw:
-                        gw_id = active_gw['message_id']
-                        await conn.execute(
-                            """
-                            INSERT INTO giveaway_participants (giveaway_message_id, user_id, progress_count)
-                            VALUES ($1, $2, 1)
-                            ON CONFLICT (giveaway_message_id, user_id) DO UPDATE
-                            SET progress_count = giveaway_participants.progress_count + 1;
-                            """,
-                            gw_id, inviter.id
-                        )
+                    gw = await conn.fetchrow("SELECT message_id FROM giveaways WHERE gw_type = 'invites' AND is_active = TRUE")
+                    if gw:
+                        await conn.execute("""
+                            INSERT INTO giveaway_participants (giveaway_message_id, user_id, progress_count) VALUES ($1, $2, 1)
+                            ON CONFLICT (giveaway_message_id, user_id) DO UPDATE SET progress_count = giveaway_participants.progress_count + 1;
+                        """, gw['message_id'], inviter.id)
         except Exception as e:
-            print(f"Erro no on_member_join para sorteio: {e}")
+            print(f"Erro no on_member_join (giveaway): {e}")
 
     async def update_sales_giveaway(self, user_id: int):
         async with self.bot.pool.acquire() as conn:
             gw = await conn.fetchrow("SELECT message_id, channel_id, prize, goal, current_progress FROM giveaways WHERE gw_type = 'purchases' AND is_active = TRUE")
             if not gw: return
-
             new_progress = gw['current_progress'] + 1
             await conn.execute("UPDATE giveaways SET current_progress = $1 WHERE message_id = $2", new_progress, gw['message_id'])
             await conn.execute("""
                 INSERT INTO giveaway_participants (giveaway_message_id, user_id, progress_count) VALUES ($1, $2, 1)
                 ON CONFLICT (giveaway_message_id, user_id) DO UPDATE SET progress_count = giveaway_participants.progress_count + 1;
             """, gw['message_id'], user_id)
-
             channel = self.bot.get_channel(gw['channel_id'])
             if not channel: return
-            
             try:
                 msg = await channel.fetch_message(gw['message_id'])
                 embed = msg.embeds[0]
                 embed.set_field_at(1, name="Como Participar?", value=f"Sorteio válido até atingirmos **{gw['goal']}** vendas!\n**Restam: `{gw['goal'] - new_progress}` vendas!**", inline=False)
                 await msg.edit(embed=embed)
-
                 if new_progress >= gw['goal']:
                     await self.end_giveaway_logic(channel, gw['message_id'])
             except discord.NotFound:
@@ -117,10 +128,13 @@ class Giveaway(commands.Cog):
     async def start_sales_giveaway(self, interaction: discord.Interaction):
         try:
             await interaction.response.defer(ephemeral=True)
-            embed = discord.Embed(title="🛍️ Sorteio por Vendas Ativo! 🛍️", description="Corra para garantir sua participação antes que acabe!", color=0x3498DB)
+            embed = discord.Embed(title="🛍️ Sorteio por Vendas Ativo! 🛍️", description="Faça compras na nossa loja e concorra a um prêmio especial!", color=0x3498DB)
             embed.add_field(name="Prêmio", value="**2.000 Robux**", inline=False)
-            embed.add_field(name="Como Participar?", value="Sorteio válido até atingirmos **20** vendas!\n**Restam: `20` vendas!**", inline=False)
+            embed.add_field(name="Critério", value="Realizar **1 compra** na loja para ser elegível.", inline=False)
+            embed.add_field(name="Meta", value="Sorteio válido até atingirmos **20** vendas!\n**Restam: `20` vendas!**", inline=False)
+            embed.add_field(name="Para Entrar", value="Reaja com 🎉 nesta mensagem para participar!", inline=False)
             gw_message = await interaction.channel.send("@everyone", embed=embed)
+            await gw_message.add_reaction('🎉')
             async with self.bot.pool.acquire() as conn:
                 await conn.execute("INSERT INTO giveaways (message_id, channel_id, prize, gw_type, goal, current_progress) VALUES ($1, $2, '2.000 Robux', 'purchases', 20, 0)", gw_message.id, interaction.channel.id)
             await interaction.followup.send("Sorteio por vendas iniciado!", ephemeral=True)
@@ -134,9 +148,11 @@ class Giveaway(commands.Cog):
             await interaction.response.defer(ephemeral=True)
             embed = discord.Embed(title="📈 Sorteio por Indicação Ativo! 📈", description="Quanto mais você convida, mais chances tem de ganhar!", color=discord.Color.purple())
             embed.add_field(name="Prêmio", value="**1.000 Robux**", inline=False)
-            embed.add_field(name="Como Participar?", value=f"Convide no mínimo 3 pessoas (não-bots).\n**Progresso: `{interaction.guild.member_count} / 1000` membros!**", inline=False)
-            embed.add_field(name="Ingressos", value="A cada 3 convidados você ganha 1 ingresso. Use `/ingresso` para ver os seus.", inline=False)
+            embed.add_field(name="Meta do Servidor", value=f"Sorteio termina quando atingirmos 1000 membros.\n**Progresso: `{interaction.guild.member_count} / 1000` membros!**", inline=False)
+            embed.add_field(name="Critério de Ingresso", value="Convidar no mínimo 3 pessoas (não-bots). Cada 3 convites = 1 ingresso!", inline=False)
+            embed.add_field(name="Para Entrar", value="Reaja com 🎉 nesta mensagem para participar!", inline=False)
             gw_message = await interaction.channel.send("@everyone", embed=embed)
+            await gw_message.add_reaction('🎉')
             async with self.bot.pool.acquire() as conn:
                 await conn.execute("INSERT INTO giveaways (message_id, channel_id, prize, gw_type, goal) VALUES ($1, $2, '1.000 Robux', 'invites', 1000)", gw_message.id, interaction.channel.id)
             await interaction.followup.send("Sorteio por convites iniciado!", ephemeral=True)
