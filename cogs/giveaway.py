@@ -118,31 +118,6 @@ class Giveaway(commands.Cog):
 
     sorteio_group = app_commands.Group(name="sorteio", description="Comandos para gerenciar sorteios.", guild_ids=[config.GUILD_ID])
 
-    @sorteio_group.command(name="anunciar", description="[Admin] Posta um anúncio com os sorteios ativos.")
-    @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
-    async def announce_giveaways(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        async with self.bot.pool.acquire() as conn:
-            active_giveaways = await conn.fetch("SELECT prize, gw_type, goal, current_progress FROM giveaways WHERE is_active = TRUE")
-        if not active_giveaways:
-            return await interaction.followup.send("Não há sorteios ativos para anunciar no momento.", ephemeral=True)
-        embed = discord.Embed(title="📣 Sorteios Ativos na Israbuy! 📣", description="Confira os sorteios que estão rolando e participe!", color=0x2ECC71)
-        for gw in active_giveaways:
-            if gw['gw_type'] == 'purchases':
-                name = f"🛍️ Sorteio por Vendas: {gw['prize']}"
-                value = f"**Critério:** Fazer 1 compra na loja.\n**Meta:** O sorteio acaba quando atingirmos **{gw['goal']}** vendas.\n**Progresso:** `{gw['current_progress']} / {gw['goal']}` vendas."
-                embed.add_field(name=name, value=value, inline=False)
-            elif gw['gw_type'] == 'invites':
-                guild = self.bot.get_guild(config.GUILD_ID)
-                name = f"📈 Sorteio por Convites: {gw['prize']}"
-                value = f"**Critério:** Convidar 3 amigos.\n**Meta:** O sorteio acaba quando o servidor atingir **{gw['goal']}** membros.\n**Progresso:** `{guild.member_count} / {gw['goal']}` membros."
-                embed.add_field(name=name, value=value, inline=False)
-        view = discord.ui.View()
-        giveaway_channel_url = f"https://discord.com/channels/{config.GUILD_ID}/{config.GIVEAWAY_CHANNEL_ID}"
-        view.add_item(discord.ui.Button(label="Ver Sorteios", style=discord.ButtonStyle.link, url=giveaway_channel_url, emoji="🎉"))
-        await interaction.channel.send(embed=embed, view=view)
-        await interaction.followup.send("Anúncio de sorteios postado!", ephemeral=True)
-
     @sorteio_group.command(name="iniciar_vendas", description="[Admin] Inicia um sorteio por 20 vendas.")
     @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
     async def start_sales_giveaway(self, interaction: discord.Interaction):
@@ -178,6 +153,28 @@ class Giveaway(commands.Cog):
             await interaction.followup.send("Sorteio por convites iniciado!", ephemeral=True)
         except Exception as e:
             await self.handle_error(interaction, e)
+
+    # --- NOVO COMANDO DE ADMIN ---
+    @sorteio_group.command(name="inserir_ingresso", description="[Admin] Adiciona ingressos de convite manualmente a um usuário.")
+    @app_commands.describe(membro="O usuário que receberá os ingressos.", ingressos="A quantidade de ingressos para adicionar (1 ingresso = 3 convites).")
+    @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
+    async def insert_ticket(self, interaction: discord.Interaction, membro: discord.Member, ingressos: app_commands.Range[int, 1]):
+        await interaction.response.defer(ephemeral=True)
+        async with self.bot.pool.acquire() as conn:
+            gw = await conn.fetchrow("SELECT message_id FROM giveaways WHERE gw_type = 'invites' AND is_active = TRUE")
+            if not gw:
+                return await interaction.followup.send("Não há um sorteio por convites ativo no momento.", ephemeral=True)
+            
+            # Converte ingressos para progresso (1 ingresso = 3 convites)
+            progress_to_add = ingressos * 3
+            
+            await conn.execute("""
+                INSERT INTO giveaway_participants (giveaway_message_id, user_id, progress_count) VALUES ($1, $2, $3)
+                ON CONFLICT (giveaway_message_id, user_id) DO UPDATE SET progress_count = giveaway_participants.progress_count + $3;
+            """, gw['message_id'], membro.id, progress_to_add)
+
+        await interaction.followup.send(f"✅ **{ingressos}** ingresso(s) adicionado(s) com sucesso para {membro.mention}!", ephemeral=True)
+
 
     @app_commands.command(name="ingresso", description="Verifica quantos ingressos você tem para o sorteio de convites.")
     async def check_tickets(self, interaction: discord.Interaction):
