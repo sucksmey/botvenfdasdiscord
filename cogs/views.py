@@ -11,19 +11,24 @@ class BackfillConfirmView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=60)
         self.confirmed = False
+
     @discord.ui.button(label="Sim, tenho certeza", style=discord.ButtonStyle.danger)
     async def confirm_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.confirmed = True
-        for item in self.children: item.disabled = True
+        for item in self.children:
+            item.disabled = True
         await interaction.response.edit_message(content="✅ Confirmado! Iniciando o preenchimento dos logs...", view=self)
         self.stop()
 
 class ReviewModal(discord.ui.Modal, title="Avalie nosso Atendimento"):
     def __init__(self, bot, customer_id, admin_id):
         super().__init__()
-        self.bot, self.customer_id, self.admin_id = bot, customer_id, admin_id
+        self.bot = bot
+        self.customer_id = customer_id
+        self.admin_id = admin_id
     nota = discord.ui.TextInput(label="Nota (de 1 a 10)", placeholder="Sua nota sincera.", min_length=1, max_length=2, required=True)
     descricao = discord.ui.TextInput(label="Descrição da Avaliação (Opcional)", style=discord.TextStyle.long, placeholder="Deixe seu comentário aqui!", required=False)
+
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         review_channel = self.bot.get_channel(config.REVIEW_CHANNEL_ID)
@@ -124,15 +129,16 @@ class GameSelectionView(discord.ui.View):
             final_price, was_discounted = await apply_discount(interaction.user, category, base_price)
             async with self.bot.pool.acquire() as conn:
                 purchase_id = await conn.fetchval("INSERT INTO purchases (user_id, product_name, product_price, admin_id) VALUES ($1, $2, $3, NULL) RETURNING id", interaction.user.id, product_name, final_price)
-            category_channel, overwrites = guild.get_channel(config.CATEGORY_VENDAS_ID), {guild.default_role: discord.PermissionOverwrite(read_messages=False), interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True), guild.get_role(config.ADMIN_ROLE_ID): discord.PermissionOverwrite(read_messages=True)}
+            category_channel = guild.get_channel(config.CATEGORY_VENDAS_ID)
+            overwrites = {guild.default_role: discord.PermissionOverwrite(read_messages=False), interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True), guild.get_role(config.ADMIN_ROLE_ID): discord.PermissionOverwrite(read_messages=True)}
             channel_name_prefix = "robux" if category == "Robux" else "geral"
             ticket_channel = await guild.create_text_channel(name=f"ticket-{channel_name_prefix}-{interaction.user.name}-{interaction.user.id}", category=category_channel, overwrites=overwrites)
             tickets_cog = self.bot.get_cog("Tickets")
             if tickets_cog:
                 ticket_payload = {'product': product_name, 'price': final_price, 'purchase_id': purchase_id, 'was_discounted': was_discounted, 'robux_amount': self.number_amount if category == "Robux" else 0}
                 tickets_cog.ticket_data[ticket_channel.id] = ticket_payload
-            payment_view = PaymentMethodView(self.bot, product_name, final_price, base_price, was_discounted)
             initial_ticket_embed = discord.Embed(title=f"Ticket de Compra de {interaction.user.display_name}", description=f"Seu pedido para **{product_name}** foi iniciado.", color=0x5865F2).set_thumbnail(url=interaction.user.display_avatar.url)
+            payment_view = PaymentMethodView(self.bot, product_name, final_price, base_price, was_discounted)
             await ticket_channel.send(f"Olá {interaction.user.mention}!", embed=initial_ticket_embed)
             await ticket_channel.send(embed=discord.Embed(description=payment_view.initial_message, color=0x36393F), view=payment_view)
             await self.original_message.delete()
@@ -140,12 +146,13 @@ class GameSelectionView(discord.ui.View):
         except Exception as e:
             traceback.print_exc()
             await interaction.followup.send(f"😕 Ocorreu um erro ao criar o ticket: `{str(e)}`", ephemeral=True)
+
     @discord.ui.button(label="Robux", style=discord.ButtonStyle.primary, emoji="💎")
     async def robux_button(self, interaction: discord.Interaction, button: discord.ui.Button): await self.create_ticket_and_cleanup(interaction, "Robux")
     @discord.ui.button(label="Valorant", style=discord.ButtonStyle.secondary, emoji="💢")
     async def valorant_button(self, interaction: discord.Interaction, button: discord.ui.Button): await interaction.response.send_message("Atalho para Valorant ainda não implementado.", ephemeral=True)
     @discord.ui.button(label="Outro Jogo", style=discord.ButtonStyle.secondary, emoji="🎮")
-    async def other_button(self, interaction: discord.Interaction, button: discord.ui.Button): await interaction.response.send_message("Para outros jogos, por favor, use o painel.", ephemeral=True)
+    async def other_button(self, interaction: discord.Interaction, button: discord.ui.Button): await interaction.response.send_message("Para outros jogos, por favor, use o painel de vendas principal.", ephemeral=True)
 
 class SalesPanelView(discord.ui.View):
     def __init__(self, bot):
@@ -166,7 +173,8 @@ class ProductSelectView(discord.ui.View):
     def __init__(self, bot: commands.Bot, user: discord.Member, category: str):
         super().__init__(timeout=None)
         self.bot, self.category = bot, category
-        vip_role, is_vip = user.guild.get_role(config.VIP_ROLE_ID), vip_role in user.roles if (vip_role := user.guild.get_role(config.VIP_ROLE_ID)) else False
+        vip_role = user.guild.get_role(config.VIP_ROLE_ID)
+        is_vip = vip_role in user.roles if vip_role else False
         all_prices = config.PRODUCTS[category].get("prices", {}).copy()
         if is_vip and "vip_prices" in config.PRODUCTS[category]: all_prices.update(config.PRODUCTS[category].get("vip_prices", {}))
         options = [discord.SelectOption(label=name) for name in all_prices.keys()]
@@ -191,10 +199,12 @@ class PurchaseConfirmView(discord.ui.View):
         try:
             for item in self.children: item.disabled = True
             await interaction.response.edit_message(content="Abrindo seu ticket...", view=None)
+            guild = interaction.guild # CORREÇÃO: Definindo 'guild' no início
             final_price, was_discounted = await apply_discount(self.member, self.category, self.price)
             async with self.bot.pool.acquire() as conn:
                 purchase_id = await conn.fetchval("INSERT INTO purchases (user_id, product_name, product_price, admin_id) VALUES ($1, $2, $3, NULL) RETURNING id", self.member.id, self.product, final_price)
-            guild, category_channel, overwrites = interaction.guild, guild.get_channel(config.CATEGORY_VENDAS_ID), {guild.default_role: discord.PermissionOverwrite(read_messages=False), self.member: discord.PermissionOverwrite(read_messages=True, send_messages=True), guild.get_role(config.ADMIN_ROLE_ID): discord.PermissionOverwrite(read_messages=True)}
+            category_channel = guild.get_channel(config.CATEGORY_VENDAS_ID)
+            overwrites = {guild.default_role: discord.PermissionOverwrite(read_messages=False), self.member: discord.PermissionOverwrite(read_messages=True, send_messages=True), guild.get_role(config.ADMIN_ROLE_ID): discord.PermissionOverwrite(read_messages=True)}
             channel_name_prefix = "robux" if self.category == "Robux" else "geral"
             ticket_channel = await guild.create_text_channel(name=f"ticket-{channel_name_prefix}-{self.member.name}-{self.member.id}", category=category_channel, overwrites=overwrites)
             tickets_cog = self.bot.get_cog("Tickets")
