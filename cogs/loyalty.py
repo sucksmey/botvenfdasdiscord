@@ -20,15 +20,25 @@ class Loyalty(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="beneficiosfidelidade", description="Mostra os benefícios do nosso programa de fidelidade.")
-    async def show_benefits(self, interaction: discord.Interaction):
+    @app_commands.command(name="beneficiosfidelidade", description="Mostra os benefícios de fidelidade de um usuário.")
+    @app_commands.describe(membro="(Opcional) O membro que você quer consultar. (Requer admin)")
+    async def show_benefits(self, interaction: discord.Interaction, membro: discord.Member = None):
         await interaction.response.defer(ephemeral=True)
+
+        target_user = membro or interaction.user
+        
+        # Se um membro foi especificado, verifica se quem usou o comando é admin
+        if membro:
+            admin_role = interaction.guild.get_role(config.ADMIN_ROLE_ID)
+            if not (interaction.user.guild_permissions.administrator or (admin_role and admin_role in interaction.user.roles)):
+                 return await interaction.followup.send("❌ Você não tem permissão para ver os benefícios de outros membros.", ephemeral=True)
+
         purchase_count = 0
         try:
             async with self.bot.pool.acquire() as conn:
                 purchase_count = await conn.fetchval(
                     "SELECT COUNT(*) FROM purchases WHERE user_id = $1 AND admin_id IS NOT NULL",
-                    interaction.user.id,
+                    target_user.id,
                     timeout=10.0
                 )
         except Exception as e:
@@ -37,12 +47,19 @@ class Loyalty(commands.Cog):
             return
 
         embed = discord.Embed(
-            title="🌟 Programa de Fidelidade Israbuy 🌟",
-            description=f"Obrigado por ser um cliente especial! Quanto mais você compra, mais benefícios exclusivos você desbloqueia.\n\n**Você tem atualmente `{purchase_count or 0}` compras verificadas.**",
+            title=f"🌟 Programa de Fidelidade de {target_user.display_name} 🌟",
+            description=f"Quanto mais compras, mais benefícios exclusivos são desbloqueados.\n\n**{target_user.display_name} tem atualmente `{purchase_count or 0}` compras verificadas.**",
             color=discord.Color.gold()
         )
+        embed.set_thumbnail(url=target_user.display_avatar.url)
+
         for count, data in LOYALTY_TIERS.items():
-            embed.add_field(name=f"{data['emoji']} {count} Compras: {data['name']}", value=data['reward'], inline=False)
+            embed.add_field(
+                name=f"{data['emoji']} {count} Compras: {data['name']}",
+                value=data['reward'],
+                inline=False
+            )
+        
         embed.set_footer(text="As recompensas são aplicadas automaticamente ao atingir a meta.")
         await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -64,10 +81,12 @@ class Loyalty(commands.Cog):
         embed.set_footer(text="Quanto mais você compra, mais você ganha!")
         await interaction.channel.send(embed=embed)
 
+
     async def check_loyalty_milestones(self, interaction: discord.Interaction, customer: discord.Member):
         try:
             guild = interaction.guild
             notification_channel = guild.get_channel(config.LOYALTY_NOTIFICATION_CHANNEL_ID)
+
             async with self.bot.pool.acquire() as conn:
                 purchase_count = await conn.fetchval("SELECT COUNT(*) FROM purchases WHERE user_id = $1 AND admin_id IS NOT NULL", customer.id)
             
