@@ -22,26 +22,21 @@ class Loyalty(commands.Cog):
 
     @app_commands.command(name="beneficiosfidelidade", description="Mostra os benefícios do nosso programa de fidelidade.")
     async def show_benefits(self, interaction: discord.Interaction):
-        # 1. Responde imediatamente para evitar o timeout
         await interaction.response.defer(ephemeral=True)
         
         purchase_count = 0
         try:
-            # 2. Tenta buscar os dados do banco de dados
             async with self.bot.pool.acquire() as conn:
-                # Adicionado um timeout de 10 segundos para a consulta
                 purchase_count = await conn.fetchval(
                     "SELECT COUNT(*) FROM purchases WHERE user_id = $1 AND admin_id IS NOT NULL",
                     interaction.user.id,
                     timeout=10.0
                 )
         except Exception as e:
-            # 3. Se a busca falhar, avisa o usuário e loga o erro
             print(f"Erro ao consultar o banco de dados no comando /beneficiosfidelidade: {e}")
             await interaction.followup.send("😕 Não consegui consultar seu histórico de compras no momento. Por favor, tente novamente mais tarde.", ephemeral=True)
             return
 
-        # 4. Se a busca for bem-sucedida, monta e envia a mensagem completa
         embed = discord.Embed(
             title="🌟 Programa de Fidelidade Israbuy 🌟",
             description=f"Obrigado por ser um cliente especial! Quanto mais você compra, mais benefícios exclusivos você desbloqueia.\n\n**Você tem atualmente `{purchase_count or 0}` compras verificadas.**",
@@ -57,6 +52,31 @@ class Loyalty(commands.Cog):
         
         embed.set_footer(text="As recompensas são aplicadas automaticamente ao atingir a meta.")
         await interaction.followup.send(embed=embed, ephemeral=True)
+
+    # --- NOVO COMANDO DE ADMIN ---
+    @app_commands.command(name="fidelidadeadmin", description="[Admin] Posta a mensagem sobre o programa de fidelidade em um canal.")
+    @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
+    async def post_loyalty_message(self, interaction: discord.Interaction):
+        # 1. Responde ao admin de forma privada e imediata
+        await interaction.response.send_message("Postando a mensagem de fidelidade...", ephemeral=True)
+
+        # 2. Cria a mensagem pública
+        embed = discord.Embed(
+            title="🌟 Conheça nosso Programa de Fidelidade! 🌟",
+            description=(
+                "Na Israbuy, valorizamos nossos clientes mais leais! ✨\n\n"
+                "A cada compra, você fica mais perto de desbloquear recompensas incríveis, como Robux grátis, descontos exclusivos e muito mais!\n\n"
+                "Quer saber quais benefícios esperam por você e quantas compras faltam para o próximo nível?\n\n"
+                "**Use o comando `/beneficiosfidelidade` para conferir!**"
+            ),
+            color=discord.Color.gold()
+        )
+        embed.set_thumbnail(url="https://i.imgur.com/your-logo-url.png") # Opcional: coloque a URL do seu logo
+        embed.set_footer(text="Quanto mais você compra, mais você ganha!")
+
+        # 3. Envia a mensagem no canal onde o comando foi usado
+        await interaction.channel.send(embed=embed)
+
 
     async def check_loyalty_milestones(self, interaction: discord.Interaction, customer: discord.Member):
         try:
