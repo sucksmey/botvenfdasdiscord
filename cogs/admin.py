@@ -7,7 +7,8 @@ import config
 import io
 import asyncio
 import traceback
-from .views import SalesPanelView, VIPPanelView, ClientPanelView, ReviewView
+import pytz
+from .views import SalesPanelView, VIPPanelView, ClientPanelView, ReviewView, BackfillConfirmView
 
 class Admin(commands.Cog):
     def __init__(self, bot):
@@ -115,7 +116,6 @@ class Admin(commands.Cog):
             await interaction.response.defer(ephemeral=True)
             channel = interaction.channel
             customer = membro
-
             if not customer:
                 try:
                     name_parts = channel.name.split('-')
@@ -124,20 +124,17 @@ class Admin(commands.Cog):
                             user_id = int(part)
                             customer = await self.bot.fetch_user(user_id)
                             break
-                    if not customer:
-                         raise ValueError("ID do usuário não encontrado no nome do canal.")
+                    if not customer: raise ValueError("ID do usuário não encontrado no nome do canal.")
                 except (ValueError, IndexError):
                     return await interaction.followup.send("Não consegui identificar o cliente. Por favor, use o parâmetro opcional `membro`.", ephemeral=True)
 
             tickets_cog = self.bot.get_cog("Tickets")
-            if not tickets_cog:
-                return await interaction.followup.send("Erro: A cog de tickets não foi encontrada.", ephemeral=True)
-
-            atendente = await self.bot.fetch_user(interaction.user.id)
+            ticket_info = tickets_cog.ticket_data.get(channel.id, {}) if tickets_cog else {}
+            atendente = await self.bot.fetch_user(ticket_info.get('admin_id', interaction.user.id))
             
             async with self.bot.pool.acquire() as conn:
                 purchase_record = await conn.fetchrow("SELECT id, product_name, product_price FROM purchases WHERE user_id = $1 ORDER BY id DESC LIMIT 1", customer.id)
-                if not purchase_record: return await interaction.followup.send("Nenhuma compra encontrada para este cliente.", ephemeral=True)
+                if not purchase_record: return await interaction.followup.send("Nenhum registro de compra encontrado para este cliente no banco de dados.", ephemeral=True)
                 
                 purchase_id = purchase_record['id']
                 product_name = purchase_record['product_name']
@@ -153,7 +150,7 @@ class Admin(commands.Cog):
 
             log_channel = guild.get_channel(config.LOGS_COMPRAS_CHANNEL_ID)
             if log_channel:
-                log_embed = discord.Embed(title="✅ Log de Compra", color=discord.Color.green(), timestamp=discord.utils.utcnow())
+                log_embed = discord.Embed(title="✅ Log de Compra", color=discord.Color.green(), timestamp=datetime.now(pytz.timezone('America/Sao_Paulo')))
                 log_embed.set_thumbnail(url=customer.display_avatar.url)
                 log_embed.add_field(name="Cliente", value=f"{customer.mention} ({customer.id})", inline=False)
                 log_embed.add_field(name="Produto", value=product_name, inline=True)
@@ -169,18 +166,33 @@ class Admin(commands.Cog):
             if entregues_category:
                 await channel.edit(category=entregues_category, name=f"entregue-{customer.name}")
 
+            public_log_channel = self.bot.get_channel(config.PUBLIC_LOGS_CHANNEL_ID)
+            if public_log_channel:
+                was_discounted = ticket_info.get('was_discounted', False)
+                async with self.bot.pool.acquire() as conn:
+                    purchase_count = await conn.fetchval("SELECT COUNT(*) FROM purchases WHERE user_id = $1 AND admin_id IS NOT NULL", customer.id)
+                    active_giveaways = await conn.fetch("SELECT prize, gw_type FROM giveaways WHERE is_active = TRUE")
+                public_embed = discord.Embed(title="🛒 Nova Compra na Israbuy!", description=f"Obrigado, {customer.mention}, por comprar conosco!", color=0x9B59B6, timestamp=datetime.now(pytz.timezone('America/Sao_Paulo')))
+                public_embed.set_thumbnail(url=customer.display_avatar.url)
+                valor_str = f"R$ {product_price:.2f}"
+                if was_discounted: valor_str += " `(-3% de Desconto)`"
+                public_embed.add_field(name="Produto Comprado", value=product_name, inline=True)
+                public_embed.add_field(name="Valor Pago", value=valor_str, inline=True)
+                public_embed.add_field(name="Status de Fidelidade", value=f"`{purchase_count}` compras realizadas! 🌟", inline=False)
+                if active_giveaways:
+                    gw_text = ""
+                    for gw in active_giveaways: gw_text += f"• Sorteio de **{gw['prize']}** por `{gw['gw_type']}`\n"
+                    public_embed.add_field(name="Sorteios Ativos", value=gw_text + "Reaja com 🎉 nos anúncios para participar!", inline=False)
+                review_view = ReviewView(self.bot, purchase_id, customer.id, atendente.id)
+                await public_log_channel.send(embed=public_embed, view=review_view)
+
             await interaction.followup.send("Compra aprovada com sucesso!", ephemeral=True)
-
-            giveaway_cog = self.bot.get_cog("Giveaway")
-            if giveaway_cog:
-                await giveaway_cog.update_sales_giveaway(customer.id)
-
-            loyalty_cog = self.bot.get_cog("Loyalty")
-            if loyalty_cog:
-                await loyalty_cog.check_loyalty_milestones(interaction, member_obj)
             
-            if channel.id in tickets_cog.ticket_data:
-                del tickets_cog.ticket_data[channel.id]
+            giveaway_cog = self.bot.get_cog("Giveaway")
+            if giveaway_cog: await giveaway_cog.update_sales_giveaway(customer.id)
+            loyalty_cog = self.bot.get_cog("Loyalty")
+            if loyalty_cog: await loyalty_cog.check_loyalty_milestones(interaction, member_obj)
+            if channel.id in tickets_cog.ticket_data: del tickets_cog.ticket_data[channel.id]
         except Exception as e:
             await self.handle_error(interaction, e)
 
@@ -191,32 +203,60 @@ class Admin(commands.Cog):
             await interaction.response.defer(ephemeral=True)
             if not interaction.channel.name.startswith("entregue-"):
                 return await interaction.followup.send("Este comando só pode ser usado em um canal de ticket arquivado (`entregue-`).", ephemeral=True)
-
-            customer = None
-            admin_role = interaction.guild.get_role(config.ADMIN_ROLE_ID)
+            customer, admin_role = None, interaction.guild.get_role(config.ADMIN_ROLE_ID)
             for member in interaction.channel.members:
                 if not member.bot and admin_role not in member.roles:
                     customer = member
                     break
-            
-            if not customer:
-                return await interaction.followup.send("Não foi possível encontrar o cliente neste ticket.", ephemeral=True)
-
+            if not customer: return await interaction.followup.send("Não foi possível encontrar o cliente neste ticket.", ephemeral=True)
             async with self.bot.pool.acquire() as conn:
-                last_purchase = await conn.fetchrow(
-                    "SELECT id, admin_id FROM purchases WHERE user_id = $1 ORDER BY purchase_date DESC LIMIT 1",
-                    customer.id
-                )
-            
-            if not last_purchase:
-                 return await interaction.followup.send("Nenhuma compra encontrada para este cliente.", ephemeral=True)
-
+                last_purchase = await conn.fetchrow("SELECT id, admin_id FROM purchases WHERE user_id = $1 ORDER BY purchase_date DESC LIMIT 1", customer.id)
+            if not last_purchase: return await interaction.followup.send("Nenhuma compra encontrada para este cliente.", ephemeral=True)
             view = ReviewView(self.bot, last_purchase['id'], customer.id, last_purchase.get('admin_id'))
             await interaction.channel.send(f"Olá {customer.mention}, poderia nos dar um feedback sobre sua compra?", view=view)
             await interaction.followup.send("Pedido de avaliação enviado ao cliente.", ephemeral=True)
-
         except Exception as e:
             await self.handle_error(interaction, e)
+    
+    logs_group = app_commands.Group(name="logs", description="Comandos para gerenciar logs.", guild_ids=[config.GUILD_ID])
+
+    @logs_group.command(name="preencher_publico", description="[Admin] Envia os logs de compras antigas para o canal público.")
+    @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
+    async def backfill_public_logs(self, interaction: discord.Interaction):
+        view = BackfillConfirmView()
+        await interaction.response.send_message(
+            "**⚠️ ATENÇÃO!** Você tem certeza que deseja preencher o log público com **TODAS** as compras antigas? "
+            "Isso pode enviar dezenas de mensagens de uma vez.",
+            view=view, ephemeral=True
+        )
+        await view.wait()
+        if not view.confirmed:
+            await interaction.followup.send("Operação cancelada.", ephemeral=True)
+            return
+
+        public_log_channel = self.bot.get_channel(config.PUBLIC_LOGS_CHANNEL_ID)
+        if not public_log_channel:
+            return await interaction.followup.send("❌ Canal de logs públicos não encontrado.", ephemeral=True)
+
+        await interaction.followup.send("Processando... por favor, aguarde.", ephemeral=True)
+        async with self.bot.pool.acquire() as conn:
+            all_purchases = await conn.fetch("SELECT * FROM purchases WHERE admin_id IS NOT NULL ORDER BY purchase_date ASC")
+        
+        for purchase in all_purchases:
+            try:
+                customer = await self.bot.fetch_user(purchase['user_id'])
+                public_embed = discord.Embed(title="🛒 Compra Antiga Registrada!", description=f"Registro da compra de {customer.mention}.", color=0x71368A, timestamp=purchase['purchase_date'])
+                public_embed.set_thumbnail(url=customer.display_avatar.url)
+                public_embed.add_field(name="Produto Comprado", value=purchase['product_name'], inline=True)
+                public_embed.add_field(name="Valor Pago", value=f"R$ {purchase['product_price']:.2f}", inline=True)
+                public_embed.set_footer(text=f"ID da Compra: {purchase['id']}")
+                await public_log_channel.send(embed=public_embed)
+                await asyncio.sleep(2)
+            except Exception as e:
+                print(f"Erro ao processar log antigo para compra ID {purchase['id']}: {e}")
+        
+        await interaction.followup.send("✅ Preenchimento de logs concluído!", ephemeral=True)
+
 
     @app_commands.command(name="fechar", description="[Admin] Deleta o ticket atual permanentemente.")
     @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
@@ -233,13 +273,10 @@ class Admin(commands.Cog):
         await self.bot.wait_until_ready()
         guild = self.bot.get_guild(config.GUILD_ID)
         if not guild: return
-
         entregues_category = guild.get_channel(config.CATEGORY_ENTREGUES_ID)
         transcript_channel = guild.get_channel(config.TRANSCRIPT_CHANNEL_ID)
         if not entregues_category or not transcript_channel: return
-
         four_days_ago = discord.utils.utcnow() - timedelta(days=4)
-
         for channel in entregues_category.text_channels:
             if channel.created_at < four_days_ago:
                 try:
