@@ -104,7 +104,6 @@ class Admin(commands.Cog):
         except Exception as e:
             await self.handle_error(interaction, e)
 
-    # --- COMANDO /aprovar ATUALIZADO ---
     @app_commands.command(name="aprovar", description="[Admin] Aprova a compra, registra e move o ticket.")
     @app_commands.describe(
         gamepass_link="O link ou ID da Game Pass do cliente.",
@@ -135,13 +134,9 @@ class Admin(commands.Cog):
                 return await interaction.followup.send("Erro: A cog de tickets não foi encontrada.", ephemeral=True)
 
             ticket_info = tickets_cog.ticket_data.get(channel.id, {})
-            product_name = ticket_info.get('product', 'N/A')
-            product_price = ticket_info.get('price', 0.0)
             atendente_id = ticket_info.get('admin_id', interaction.user.id)
             atendente = await self.bot.fetch_user(atendente_id)
             
-            # --- LÓGICA ATUALIZADA ---
-            # Busca o último registro de compra do cliente no banco de dados
             async with self.bot.pool.acquire() as conn:
                 purchase_record = await conn.fetchrow(
                     "SELECT id, product_name, product_price FROM purchases WHERE user_id = $1 ORDER BY id DESC LIMIT 1",
@@ -150,12 +145,10 @@ class Admin(commands.Cog):
                 if not purchase_record:
                     return await interaction.followup.send("Nenhum registro de compra encontrado para este cliente no banco de dados.", ephemeral=True)
                 
-                # Usa os dados do banco de dados se a memória falhar
                 purchase_id = purchase_record['id']
-                if product_name == 'N/A': product_name = purchase_record['product_name']
-                if product_price == 0.0: product_price = purchase_record['product_price']
-
-                # Atualiza o registro com os dados do admin e da gamepass
+                product_name = purchase_record['product_name']
+                product_price = float(purchase_record['product_price'])
+                
                 await conn.execute(
                     "UPDATE purchases SET admin_id = $1, gamepass_link = $2 WHERE id = $3",
                     atendente.id, gamepass_link, purchase_id
@@ -188,6 +181,11 @@ class Admin(commands.Cog):
                 await channel.edit(category=entregues_category, name=f"entregue-{customer.name}")
 
             await interaction.followup.send("Compra aprovada com sucesso!", ephemeral=True)
+            
+            loyalty_cog = self.bot.get_cog("Loyalty")
+            if loyalty_cog:
+                await loyalty_cog.check_loyalty_milestones(interaction, member_obj)
+            
             if channel.id in tickets_cog.ticket_data:
                 del tickets_cog.ticket_data[channel.id]
         except Exception as e:
@@ -202,8 +200,9 @@ class Admin(commands.Cog):
                 return await interaction.followup.send("Este comando só pode ser usado em um canal de ticket arquivado (`entregue-`).", ephemeral=True)
 
             customer = None
+            admin_role = interaction.guild.get_role(config.ADMIN_ROLE_ID)
             for member in interaction.channel.members:
-                if not member.bot and not member.guild_permissions.manage_channels:
+                if not member.bot and admin_role not in member.roles:
                     customer = member
                     break
             
