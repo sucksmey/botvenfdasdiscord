@@ -23,19 +23,30 @@ class Database(commands.Cog):
                     );
                 ''')
                 await conn.execute('''
-                    CREATE TABLE IF NOT EXISTS discount (
-                        id INT PRIMARY KEY,
-                        percentage NUMERIC(5, 2) NOT NULL,
-                        apply_to_all BOOLEAN DEFAULT FALSE
+                    CREATE TABLE IF NOT EXISTS discount (id INT PRIMARY KEY, percentage NUMERIC(5, 2) NOT NULL, apply_to_all BOOLEAN DEFAULT FALSE);
+                ''')
+                await conn.execute('''
+                    CREATE TABLE IF NOT EXISTS ad_message (id INT PRIMARY KEY, channel_id BIGINT NOT NULL, message_id BIGINT NOT NULL, current_index INT NOT NULL);
+                ''')
+                # --- TABELAS DE SORTEIO ATUALIZADAS ---
+                await conn.execute('''
+                    CREATE TABLE IF NOT EXISTS giveaways (
+                        message_id BIGINT PRIMARY KEY,
+                        channel_id BIGINT NOT NULL,
+                        prize TEXT NOT NULL,
+                        gw_type TEXT NOT NULL, -- 'invites' ou 'purchases'
+                        goal INT NOT NULL, -- Meta (1000 membros ou 20 vendas)
+                        current_progress INT DEFAULT 0, -- Progresso atual
+                        is_active BOOLEAN DEFAULT TRUE
                     );
                 ''')
-                # NOVA TABELA PARA A MENSAGEM DE PROPAGANDA
                 await conn.execute('''
-                    CREATE TABLE IF NOT EXISTS ad_message (
-                        id INT PRIMARY KEY,
-                        channel_id BIGINT NOT NULL,
-                        message_id BIGINT NOT NULL,
-                        current_index INT NOT NULL
+                    CREATE TABLE IF NOT EXISTS giveaway_participants (
+                        id SERIAL PRIMARY KEY,
+                        giveaway_message_id BIGINT NOT NULL,
+                        user_id BIGINT NOT NULL,
+                        progress_count INT DEFAULT 0, -- Convites ou compras
+                        UNIQUE (giveaway_message_id, user_id)
                     );
                 ''')
             print("Tabelas do banco de dados verificadas/criadas.")
