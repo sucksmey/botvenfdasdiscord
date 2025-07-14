@@ -102,10 +102,7 @@ class Admin(commands.Cog):
             await self.handle_error(interaction, e)
 
     @app_commands.command(name="aprovar", description="[Admin] Aprova a compra, registra e move o ticket.")
-    @app_commands.describe(
-        membro="O cliente da compra.",
-        gamepass_link="O link ou ID da Game Pass do cliente."
-    )
+    @app_commands.describe(membro="O cliente da compra.", gamepass_link="O link ou ID da Game Pass do cliente.")
     @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
     async def aprovar(self, interaction: discord.Interaction, membro: discord.Member, gamepass_link: str):
         try:
@@ -147,7 +144,9 @@ class Admin(commands.Cog):
             await channel.send(f"Sua compra foi aprovada! O entregador <@{config.ROBUX_DELIVERY_USER_ID}> já foi notificado. Obrigado por comprar conosco!")
             
             entregues_category = guild.get_channel(config.CATEGORY_ENTREGUES_ID)
-            if entregues_category: await channel.edit(category=entregues_category, name=f"entregue-{customer.name}")
+            if entregues_category:
+                new_name = f"entregue-{customer.name}-{customer.id}"
+                await channel.edit(category=entregues_category, name=new_name)
 
             public_log_channel = self.bot.get_channel(config.PUBLIC_LOGS_CHANNEL_ID)
             if public_log_channel:
@@ -184,17 +183,26 @@ class Admin(commands.Cog):
     async def avaliacao(self, interaction: discord.Interaction):
         try:
             await interaction.response.defer(ephemeral=True)
-            if not interaction.channel.name.startswith("entregue-"):
+            channel = interaction.channel
+            if not channel.name.startswith("entregue-"):
                 return await interaction.followup.send("Use este comando em um canal de ticket arquivado (`entregue-`).", ephemeral=True)
-            customer, admin_role = None, interaction.guild.get_role(config.ADMIN_ROLE_ID)
-            for member in interaction.channel.members:
-                if not member.bot and admin_role not in member.roles:
-                    customer = member
-                    break
-            if not customer: return await interaction.followup.send("Não foi possível encontrar o cliente neste ticket.", ephemeral=True)
+            
+            customer = None
+            try:
+                name_parts = channel.name.split('-')
+                user_id = int(name_parts[-1])
+                customer = await self.bot.fetch_user(user_id)
+            except (ValueError, IndexError):
+                 return await interaction.followup.send("Não foi possível identificar o cliente pelo nome do canal. Certifique-se de que o nome não foi alterado.", ephemeral=True)
+            
+            if not customer:
+                return await interaction.followup.send("Cliente não encontrado.", ephemeral=True)
+
             async with self.bot.pool.acquire() as conn:
                 last_purchase = await conn.fetchrow("SELECT id, admin_id FROM purchases WHERE user_id = $1 ORDER BY purchase_date DESC LIMIT 1", customer.id)
-            if not last_purchase: return await interaction.followup.send("Nenhuma compra encontrada para este cliente.", ephemeral=True)
+            if not last_purchase:
+                 return await interaction.followup.send("Nenhuma compra encontrada no banco de dados para este cliente.", ephemeral=True)
+
             view = ReviewView(self.bot, last_purchase['id'], customer.id, last_purchase.get('admin_id'))
             await interaction.channel.send(f"Olá {customer.mention}, poderia nos dar um feedback sobre sua compra?", view=view)
             await interaction.followup.send("Pedido de avaliação enviado ao cliente.", ephemeral=True)
@@ -211,11 +219,14 @@ class Admin(commands.Cog):
         if not view.confirmed:
             await interaction.followup.send("Operação cancelada.", ephemeral=True)
             return
+        
         public_log_channel = self.bot.get_channel(config.PUBLIC_LOGS_CHANNEL_ID)
         if not public_log_channel: return await interaction.followup.send("❌ Canal de logs públicos não encontrado.", ephemeral=True)
-        await interaction.followup.send("Processando...", ephemeral=True)
+        
+        await interaction.followup.send("Processando... por favor, aguarde.", ephemeral=True)
         async with self.bot.pool.acquire() as conn:
             all_purchases = await conn.fetch("SELECT * FROM purchases WHERE admin_id IS NOT NULL ORDER BY purchase_date ASC")
+        
         for purchase in all_purchases:
             try:
                 customer = await self.bot.fetch_user(purchase['user_id'])
@@ -228,6 +239,7 @@ class Admin(commands.Cog):
                 await asyncio.sleep(2)
             except Exception as e:
                 print(f"Erro ao processar log antigo para compra ID {purchase['id']}: {e}")
+        
         await interaction.followup.send("✅ Preenchimento de logs concluído!", ephemeral=True)
 
     @app_commands.command(name="fechar", description="[Admin] Deleta o ticket atual permanentemente.")
