@@ -6,14 +6,37 @@ import config
 import traceback
 import random
 
-# --- Textos das Propagandas (com emojis padrão) ---
+# --- Textos das Propagandas (com a nova mensagem de fidelidade) ---
+
+# Primeiro, definimos a nova propaganda para ficar mais organizado
+loyalty_ad_embed = discord.Embed(
+    title="🌟 Conheça nosso Programa de Fidelidade! 🌟",
+    description=(
+        "Na Israbuy, valorizamos nossos clientes mais leais! ✨\n\n"
+        "A cada compra, você fica mais perto de desbloquear recompensas incríveis, como Robux grátis, descontos exclusivos e muito mais!\n\n"
+        "Quer saber quais benefícios esperam por você e quantas compras faltam para o próximo nível?\n\n"
+        "**Use o comando `/beneficiosfidelidade` para conferir!**"
+    ),
+    color=discord.Color.gold()
+).set_footer(text="Quanto mais você compra, mais você ganha!")
+
+
 AD_MESSAGES = [
     {
         "content": "🎉 Sua primeira compra na **ISRABUY** tem presente!",
         "embed": discord.Embed(
             description="## Você ganha **3% de DESCONTO** na sua primeira compra de Robux! 💎\n\nBasta iniciar um ticket de compra que o desconto será aplicado **automaticamente** no seu pedido.",
-            color=0xFF69B4  # Cor Rosinha
+            color=0xFF69B4
         )
+    },
+    # ADICIONADO AQUI 2 VEZES PARA DURAR MAIS
+    {
+        "content": "",
+        "embed": loyalty_ad_embed
+    },
+    {
+        "content": "",
+        "embed": loyalty_ad_embed
     },
     {
         "content": "Cansou de estar afundado no Bronze ou no Prata no Valorant? Nós subimos você! 😈",
