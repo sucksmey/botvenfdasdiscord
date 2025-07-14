@@ -12,9 +12,11 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+# INTENTS ATUALIZADOS para incluir rastreamento de convites
 intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
+intents.invites = True
 
 class IsrabuyBot(commands.Bot):
     def __init__(self):
@@ -41,7 +43,8 @@ class IsrabuyBot(commands.Bot):
             'cogs.advertising',
             'cogs.ai_assistant',
             'cogs.status_manager',
-            'cogs.loyalty'
+            'cogs.loyalty',
+            'cogs.giveaway'
         ]
         
         for extension in initial_extensions:
