@@ -133,26 +133,17 @@ class Admin(commands.Cog):
             if not tickets_cog:
                 return await interaction.followup.send("Erro: A cog de tickets não foi encontrada.", ephemeral=True)
 
-            ticket_info = tickets_cog.ticket_data.get(channel.id, {})
-            atendente_id = ticket_info.get('admin_id', interaction.user.id)
-            atendente = await self.bot.fetch_user(atendente_id)
+            atendente = await self.bot.fetch_user(interaction.user.id)
             
             async with self.bot.pool.acquire() as conn:
-                purchase_record = await conn.fetchrow(
-                    "SELECT id, product_name, product_price FROM purchases WHERE user_id = $1 ORDER BY id DESC LIMIT 1",
-                    customer.id
-                )
-                if not purchase_record:
-                    return await interaction.followup.send("Nenhum registro de compra encontrado para este cliente no banco de dados.", ephemeral=True)
+                purchase_record = await conn.fetchrow("SELECT id, product_name, product_price FROM purchases WHERE user_id = $1 ORDER BY id DESC LIMIT 1", customer.id)
+                if not purchase_record: return await interaction.followup.send("Nenhuma compra encontrada para este cliente.", ephemeral=True)
                 
                 purchase_id = purchase_record['id']
                 product_name = purchase_record['product_name']
                 product_price = float(purchase_record['product_price'])
                 
-                await conn.execute(
-                    "UPDATE purchases SET admin_id = $1, gamepass_link = $2 WHERE id = $3",
-                    atendente.id, gamepass_link, purchase_id
-                )
+                await conn.execute("UPDATE purchases SET admin_id = $1, gamepass_link = $2 WHERE id = $3", atendente.id, gamepass_link, purchase_id)
 
             guild = interaction.guild
             member_obj = await guild.fetch_member(customer.id)
@@ -160,28 +151,30 @@ class Admin(commands.Cog):
             if client_role and client_role not in member_obj.roles:
                 await member_obj.add_roles(client_role, reason="Compra aprovada.")
 
-            entregues_category = guild.get_channel(config.CATEGORY_ENTREGUES_ID)
             log_channel = guild.get_channel(config.LOGS_COMPRAS_CHANNEL_ID)
-
-            log_embed = discord.Embed(title="✅ Log de Compra", color=discord.Color.green(), timestamp=discord.utils.utcnow())
-            log_embed.set_thumbnail(url=customer.display_avatar.url)
-            log_embed.add_field(name="Cliente", value=f"{customer.mention} ({customer.id})", inline=False)
-            log_embed.add_field(name="Produto", value=product_name, inline=True)
-            log_embed.add_field(name="Valor", value=f"R$ {product_price:.2f}", inline=True)
-            log_embed.add_field(name="Atendente", value=atendente.mention, inline=False)
-            log_embed.add_field(name="Entregador", value=f"<@{config.ROBUX_DELIVERY_USER_ID}>", inline=False)
-            log_embed.add_field(name="Link da Gamepass", value=gamepass_link, inline=False)
-
             if log_channel:
+                log_embed = discord.Embed(title="✅ Log de Compra", color=discord.Color.green(), timestamp=discord.utils.utcnow())
+                log_embed.set_thumbnail(url=customer.display_avatar.url)
+                log_embed.add_field(name="Cliente", value=f"{customer.mention} ({customer.id})", inline=False)
+                log_embed.add_field(name="Produto", value=product_name, inline=True)
+                log_embed.add_field(name="Valor", value=f"R$ {product_price:.2f}", inline=True)
+                log_embed.add_field(name="Atendente", value=atendente.mention, inline=False)
+                log_embed.add_field(name="Entregador", value=f"<@{config.ROBUX_DELIVERY_USER_ID}>", inline=False)
+                log_embed.add_field(name="Link da Gamepass", value=gamepass_link, inline=False)
                 await log_channel.send(embed=log_embed)
 
             await channel.send(f"Sua compra foi aprovada! O entregador <@{config.ROBUX_DELIVERY_USER_ID}> já foi notificado. Obrigado por comprar conosco!")
             
+            entregues_category = guild.get_channel(config.CATEGORY_ENTREGUES_ID)
             if entregues_category:
                 await channel.edit(category=entregues_category, name=f"entregue-{customer.name}")
 
             await interaction.followup.send("Compra aprovada com sucesso!", ephemeral=True)
-            
+
+            giveaway_cog = self.bot.get_cog("Giveaway")
+            if giveaway_cog:
+                await giveaway_cog.update_sales_giveaway(customer.id)
+
             loyalty_cog = self.bot.get_cog("Loyalty")
             if loyalty_cog:
                 await loyalty_cog.check_loyalty_milestones(interaction, member_obj)
