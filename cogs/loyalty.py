@@ -3,8 +3,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import config
+import traceback
 
-# O dicionário de tiers é mantido para não gerar outros erros, mas não será usado no comando de teste.
 LOYALTY_TIERS = {
     10: {"name": "Cliente Fiel 🥉", "reward": "1.000 Robux por R$35 na sua próxima compra!", "role_id": config.LOYALTY_ROLE_10, "emoji": "🥉"},
     20: {"name": "Cliente Bronze II", "reward": "100 Robux grátis na sua próxima compra!", "role_id": None, "emoji": "🎯"},
@@ -20,20 +20,49 @@ class Loyalty(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    # --- COMANDO DE TESTE ---
     @app_commands.command(name="beneficiosfidelidade", description="Mostra os benefícios do nosso programa de fidelidade.")
     async def show_benefits(self, interaction: discord.Interaction):
-        # O teste é apenas enviar uma resposta direta, sem acessar o banco de dados ou criar embeds complexos.
+        # 1. Responde imediatamente para evitar o timeout
+        await interaction.response.defer(ephemeral=True)
+        
+        purchase_count = 0
         try:
-            await interaction.response.send_message("Teste de resposta do comando de fidelidade bem-sucedido!", ephemeral=True)
+            # 2. Tenta buscar os dados do banco de dados
+            async with self.bot.pool.acquire() as conn:
+                # Adicionado um timeout de 10 segundos para a consulta
+                purchase_count = await conn.fetchval(
+                    "SELECT COUNT(*) FROM purchases WHERE user_id = $1 AND admin_id IS NOT NULL",
+                    interaction.user.id,
+                    timeout=10.0
+                )
         except Exception as e:
-            print(f"ERRO NO COMANDO DE TESTE: {e}")
-            # Se mesmo isso falhar, o erro será logado.
+            # 3. Se a busca falhar, avisa o usuário e loga o erro
+            print(f"Erro ao consultar o banco de dados no comando /beneficiosfidelidade: {e}")
+            await interaction.followup.send("😕 Não consegui consultar seu histórico de compras no momento. Por favor, tente novamente mais tarde.", ephemeral=True)
+            return
+
+        # 4. Se a busca for bem-sucedida, monta e envia a mensagem completa
+        embed = discord.Embed(
+            title="🌟 Programa de Fidelidade Israbuy 🌟",
+            description=f"Obrigado por ser um cliente especial! Quanto mais você compra, mais benefícios exclusivos você desbloqueia.\n\n**Você tem atualmente `{purchase_count or 0}` compras verificadas.**",
+            color=discord.Color.gold()
+        )
+
+        for count, data in LOYALTY_TIERS.items():
+            embed.add_field(
+                name=f"{data['emoji']} {count} Compras: {data['name']}",
+                value=data['reward'],
+                inline=False
+            )
+        
+        embed.set_footer(text="As recompensas são aplicadas automaticamente ao atingir a meta.")
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     async def check_loyalty_milestones(self, interaction: discord.Interaction, customer: discord.Member):
         try:
             guild = interaction.guild
             notification_channel = guild.get_channel(config.LOYALTY_NOTIFICATION_CHANNEL_ID)
+
             async with self.bot.pool.acquire() as conn:
                 purchase_count = await conn.fetchval(
                     "SELECT COUNT(*) FROM purchases WHERE user_id = $1 AND admin_id IS NOT NULL",
