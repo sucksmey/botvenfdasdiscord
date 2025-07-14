@@ -42,6 +42,7 @@ class ReviewModal(discord.ui.Modal, title="Avalie nosso Atendimento"):
         await review_channel.send(embed=embed)
         await interaction.followup.send("✅ Sua avaliação foi enviada com sucesso! Muito obrigado!", ephemeral=True)
 
+
 class ReviewView(discord.ui.View):
     def __init__(self, bot, purchase_id, customer_id, admin_id):
         super().__init__(timeout=None)
@@ -64,10 +65,10 @@ class RegionalPricingCheckView(discord.ui.View):
 
     @discord.ui.button(label="Sim, desativei", style=discord.ButtonStyle.success, custom_id="regional_yes")
     async def sim_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
-        for item in self.children: item.disabled = True
+        # CORREÇÃO: Remove a view (os botões) após a confirmação para limpar a mensagem.
         await interaction.response.edit_message(
             content=f"Perfeito! O entregador <@{config.ROBUX_DELIVERY_USER_ID}> foi notificado e fará a entrega em breve.",
-            view=self
+            view=None
         )
 
     @discord.ui.button(label="Não, ainda não", style=discord.ButtonStyle.danger, custom_id="regional_no")
@@ -85,7 +86,14 @@ class GamepassCheckView(discord.ui.View):
     @discord.ui.button(label="Sim, sei criar", style=discord.ButtonStyle.primary, custom_id="gp_yes")
     async def sim_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         for item in self.children: item.disabled = True
-        await interaction.response.edit_message(content="Ótimo! Por favor, envie o **link** ou **ID** da sua Game Pass no chat.", view=self)
+        
+        # CORREÇÃO: Adiciona o cálculo e a instrução de valor aqui também.
+        gamepass_value = int((self.robux_amount / 0.7) + 0.99)
+        message_content = (
+            "Ótimo! Por favor, envie o **link** ou **ID** da sua Game Pass no chat.\n\n"
+            f"Lembre-se que ela precisa ter o valor de **`{gamepass_value}` Robux** e os preços regionais devem estar **desativados**."
+        )
+        await interaction.response.edit_message(content=message_content, view=self)
 
     @discord.ui.button(label="Não, preciso de ajuda", style=discord.ButtonStyle.secondary, custom_id="gp_no")
     async def nao_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -98,7 +106,7 @@ class GamepassCheckView(discord.ui.View):
         )
         tutorial_embed = discord.Embed(title="Tutorial - Criando uma Game Pass", description=description, color=discord.Color.blue())
         tutorial_embed.add_field(name="Link do Tutorial", value="[Clique aqui para assistir](http://www.youtube.com/watch?v=B-LQU3J24pI)")
-        await interaction.response.edit_message(embed=tutorial_embed, view=self)
+        await interaction.response.edit_message(content="", embed=tutorial_embed, view=self)
 
 # --- View de Pagamento ---
 class PaymentMethodView(discord.ui.View):
