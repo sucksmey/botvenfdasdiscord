@@ -4,6 +4,7 @@ from discord import app_commands
 from discord.ext import commands
 import config
 
+# O dicionário de tiers é mantido para não gerar outros erros, mas não será usado no comando de teste.
 LOYALTY_TIERS = {
     10: {"name": "Cliente Fiel 🥉", "reward": "1.000 Robux por R$35 na sua próxima compra!", "role_id": config.LOYALTY_ROLE_10, "emoji": "🥉"},
     20: {"name": "Cliente Bronze II", "reward": "100 Robux grátis na sua próxima compra!", "role_id": None, "emoji": "🎯"},
@@ -19,27 +20,25 @@ class Loyalty(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    # --- COMANDO DE TESTE ---
     @app_commands.command(name="beneficiosfidelidade", description="Mostra os benefícios do nosso programa de fidelidade.")
     async def show_benefits(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        async with self.bot.pool.acquire() as conn:
-            purchase_count = await conn.fetchval("SELECT COUNT(*) FROM purchases WHERE user_id = $1 AND admin_id IS NOT NULL", interaction.user.id)
-        embed = discord.Embed(
-            title="🌟 Programa de Fidelidade Israbuy 🌟",
-            description=f"Obrigado por ser um cliente especial! Quanto mais você compra, mais benefícios exclusivos você desbloqueia.\n\n**Você tem atualmente `{purchase_count}` compras verificadas.**",
-            color=discord.Color.gold()
-        )
-        for count, data in LOYALTY_TIERS.items():
-            embed.add_field(name=f"{data['emoji']} {count} Compras: {data['name']}", value=data['reward'], inline=False)
-        embed.set_footer(text="As recompensas são aplicadas automaticamente ao atingir a meta.")
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        # O teste é apenas enviar uma resposta direta, sem acessar o banco de dados ou criar embeds complexos.
+        try:
+            await interaction.response.send_message("Teste de resposta do comando de fidelidade bem-sucedido!", ephemeral=True)
+        except Exception as e:
+            print(f"ERRO NO COMANDO DE TESTE: {e}")
+            # Se mesmo isso falhar, o erro será logado.
 
     async def check_loyalty_milestones(self, interaction: discord.Interaction, customer: discord.Member):
         try:
             guild = interaction.guild
             notification_channel = guild.get_channel(config.LOYALTY_NOTIFICATION_CHANNEL_ID)
             async with self.bot.pool.acquire() as conn:
-                purchase_count = await conn.fetchval("SELECT COUNT(*) FROM purchases WHERE user_id = $1 AND admin_id IS NOT NULL", customer.id)
+                purchase_count = await conn.fetchval(
+                    "SELECT COUNT(*) FROM purchases WHERE user_id = $1 AND admin_id IS NOT NULL",
+                    customer.id
+                )
             
             if purchase_count in LOYALTY_TIERS:
                 tier_data = LOYALTY_TIERS[purchase_count]
