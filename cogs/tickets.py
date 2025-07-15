@@ -9,7 +9,7 @@ from .views import GamepassCheckView, TutorialGamepassView, GameSelectionView
 class Tickets(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        # Armazena {channel_id: {'product': str, 'price': float, ..., 'flow_step': str}}
+        # Armazena {channel_id: {..., 'flow_step': str}}
         self.ticket_data = {}
 
     @commands.Cog.listener()
@@ -48,23 +48,30 @@ class Tickets(commands.Cog):
         # Continua apenas se for uma compra de robux
         if robux_amount > 0:
             # 1. Detecta comprovante (qualquer anexo)
-            # Só reage se o fluxo não tiver avançado para os próximos passos
             if message.attachments and current_step not in ["awaiting_link", "awaiting_regional_confirmation"]:
                 ticket_info['flow_step'] = "awaiting_gamepass_knowledge"
                 view = GamepassCheckView(robux_amount=robux_amount)
                 # MENSAGEM CORRIGIDA
                 await message.channel.send(
-                    f"{message.author.mention}, recebemos seu comprovante! A forma de entrega é através de Gamepass. Você sabe criar uma?",
+                    f"{message.author.mention}, recebemos seu comprovante! A forma de entrega é através de Gamepass, você sabe criar uma?",
                     view=view
                 )
                 return
 
-            # 2. Detecta link da gamepass
-            # Só reage se o bot estiver esperando por um link
-            if current_step == "awaiting_link":
-                match = re.search(r'(?:game-pass/|)(\d{8,})', message.content)
+            # 2. Detecta link ou ID de gamepass
+            if ticket_info.get('flow_step') == "awaiting_link":
+                content = message.content.strip()
+                match = None
+                
+                # Tenta detectar se a mensagem é apenas um ID numérico
+                if content.isdigit() and len(content) >= 8:
+                    match = re.search(r'\d+', content)
+                else:
+                    # Se não for, tenta detectar o padrão de link
+                    match = re.search(r'(?:game-pass/|)(\d{8,})', content)
+
                 if match:
-                    # CORREÇÃO DO LOOP: Avança o estado do fluxo
+                    # CORREÇÃO DO LOOP: Avança o estado do fluxo para evitar que a mesma mensagem seja lida de novo
                     ticket_info['flow_step'] = "awaiting_regional_confirmation"
                     from .views import RegionalPricingCheckView
                     view = RegionalPricingCheckView()
