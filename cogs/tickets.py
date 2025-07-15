@@ -9,6 +9,7 @@ from .views import GamepassCheckView, TutorialGamepassView, GameSelectionView
 class Tickets(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        # Armazena {channel_id: {'product': str, 'price': float, ..., 'flow_step': str}}
         self.ticket_data = {}
 
     @commands.Cog.listener()
@@ -16,6 +17,7 @@ class Tickets(commands.Cog):
         if message.author.bot or not message.guild:
             return
 
+        # Lógica para o canal #compre-aqui
         if message.channel.id == config.COMPRE_AQUI_CHANNEL_ID:
             content = message.content.strip()
             if content.isdigit():
@@ -24,6 +26,7 @@ class Tickets(commands.Cog):
                 await message.reply("Detectei um valor! Para qual jogo você gostaria de comprar?", view=view)
                 return
 
+        # Lógica para canais de ticket
         channel_name = message.channel.name.lower()
         if not (channel_name.startswith("ticket-") or channel_name.startswith("atendido-")):
             return
@@ -34,23 +37,41 @@ class Tickets(commands.Cog):
         except (ValueError, IndexError):
             return
 
+        # O bot só interage com o dono do ticket
         if message.author.id != customer_id_from_name:
             return
 
         ticket_info = self.ticket_data.get(message.channel.id, {})
         robux_amount = ticket_info.get('robux_amount', 0)
+        current_step = ticket_info.get('flow_step', None)
 
+        # Continua apenas se for uma compra de robux
         if robux_amount > 0:
-            if message.attachments:
+            # 1. Detecta comprovante (qualquer anexo)
+            # Só reage se o fluxo não tiver avançado para os próximos passos
+            if message.attachments and current_step not in ["awaiting_link", "awaiting_regional_confirmation"]:
+                ticket_info['flow_step'] = "awaiting_gamepass_knowledge"
                 view = GamepassCheckView(robux_amount=robux_amount)
-                await message.channel.send(f"{message.author.mention}, recebemos seu comprovante! Por favor, responda abaixo:", view=view)
+                # MENSAGEM CORRIGIDA
+                await message.channel.send(
+                    f"{message.author.mention}, recebemos seu comprovante! A forma de entrega é através de Gamepass. Você sabe criar uma?",
+                    view=view
+                )
                 return
 
-            match = re.search(r'(?:game-pass/|)(\d{8,})', message.content)
-            if match:
-                from .views import RegionalPricingCheckView
-                view = RegionalPricingCheckView()
-                await message.reply("Ótimo! Detectei o link/ID da sua Game Pass. Antes de finalizar, por favor confirme se você **DESATIVOU** os preços regionais:", view=view)
+            # 2. Detecta link da gamepass
+            # Só reage se o bot estiver esperando por um link
+            if current_step == "awaiting_link":
+                match = re.search(r'(?:game-pass/|)(\d{8,})', message.content)
+                if match:
+                    # CORREÇÃO DO LOOP: Avança o estado do fluxo
+                    ticket_info['flow_step'] = "awaiting_regional_confirmation"
+                    from .views import RegionalPricingCheckView
+                    view = RegionalPricingCheckView()
+                    await message.reply(
+                        "Ótimo! Detectei o link/ID da sua Game Pass. Antes de finalizar, por favor confirme se você **DESATIVOU** os preços regionais:",
+                        view=view
+                    )
     
     @app_commands.command(name="minhascompras", description="Ver seu histórico de compras.")
     async def minhas_compras(self, interaction: discord.Interaction):
@@ -78,7 +99,7 @@ class Tickets(commands.Cog):
     async def tutorial_gamepass(self, interaction: discord.Interaction, robux: int):
         gamepass_value = int((robux / 0.7) + 0.99)
         await interaction.response.send_message(
-            f"Para você receber `{robux}` Robux, a Game Pass precisa ser criada com o valor de **{gamepass_value} Robux** (para cobrir a taxa de 30% do Roblox).\nSiga o tutorial abaixo.",
+            f"Para você receber `{robux}` Robux, a Game Pass precisa ser criada com o valor de **{gamepass_value} Robux**.\nSiga o tutorial abaixo.",
             view=TutorialGamepassView()
         )
 
