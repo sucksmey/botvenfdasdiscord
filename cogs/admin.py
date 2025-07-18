@@ -74,6 +74,7 @@ class Admin(commands.Cog):
             await self.handle_error(interaction, e)
 
     desconto_group = app_commands.Group(name="desconto", description="Gerencia o desconto global.", guild_ids=[config.GUILD_ID])
+
     @desconto_group.command(name="aplicar", description="Aplica um desconto promocional para todos.")
     @app_commands.describe(porcentagem="Valor do desconto (ex: 10).")
     @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
@@ -101,7 +102,10 @@ class Admin(commands.Cog):
             await self.handle_error(interaction, e)
 
     @app_commands.command(name="aprovar", description="[Admin] Aprova a compra, registra e move o ticket.")
-    @app_commands.describe(membro="O cliente da compra.", gamepass_link="O link ou ID da Game Pass do cliente.")
+    @app_commands.describe(
+        membro="O cliente da compra.",
+        gamepass_link="O link ou ID da Game Pass do cliente."
+    )
     @app_commands.checks.has_role(config.ADMIN_ROLE_ID)
     async def aprovar(self, interaction: discord.Interaction, membro: discord.Member, gamepass_link: str):
         try:
@@ -140,20 +144,20 @@ class Admin(commands.Cog):
 
             await channel.send(f"Sua compra foi aprovada! O entregador <@{config.ROBUX_DELIVERY_USER_ID}> já foi notificado. Obrigado!")
             
+            # Log Público
             public_log_channel = self.bot.get_channel(config.PUBLIC_LOGS_CHANNEL_ID)
             if public_log_channel:
                 tickets_cog = self.bot.get_cog("Tickets")
                 ticket_info = tickets_cog.ticket_data.get(channel.id, {}) if tickets_cog else {}
                 was_discounted = ticket_info.get('was_discounted', False)
-                async with self.bot.pool.acquire() as conn:
-                    purchase_count = await conn.fetchval("SELECT COUNT(*) FROM purchases WHERE user_id = $1 AND admin_id IS NOT NULL", customer.id)
+
                 public_embed = discord.Embed(title="🛒 Nova Compra na Israbuy!", description=f"Obrigado, {customer.mention}, por comprar conosco!", color=0x9B59B6, timestamp=datetime.now(pytz.timezone('America/Sao_Paulo')))
                 public_embed.set_thumbnail(url=customer.display_avatar.url)
                 valor_str = f"R$ {product_price:.2f}"
                 if was_discounted: valor_str += " `(-3% de Desconto)`"
                 public_embed.add_field(name="Produto Comprado", value=product_name, inline=False)
                 public_embed.add_field(name="Valor Pago", value=valor_str, inline=False)
-                public_embed.add_field(name="Status de Fidelidade", value=f"`{purchase_count}` compras realizadas! 🌟", inline=False)
+                
                 review_view = ReviewView(self.bot, purchase_id, customer.id, atendente.id)
                 await public_log_channel.send(embed=public_embed, view=review_view)
 
@@ -164,8 +168,6 @@ class Admin(commands.Cog):
             
             giveaway_cog = self.bot.get_cog("Giveaway")
             if giveaway_cog: await giveaway_cog.update_sales_giveaway(customer.id)
-            loyalty_cog = self.bot.get_cog("Loyalty")
-            if loyalty_cog: await loyalty_cog.check_loyalty_milestones(interaction, customer)
             
             if tickets_cog and channel.id in tickets_cog.ticket_data: del tickets_cog.ticket_data[channel.id]
         except Exception as e:
