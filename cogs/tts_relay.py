@@ -11,7 +11,7 @@ class TTSRelay(commands.Cog):
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
-        # Verifica se a atualização é do usuário alvo
+        # Continua seguindo o usuário alvo
         if member.id != config.TTS_TARGET_USER_ID:
             return
 
@@ -19,14 +19,12 @@ class TTSRelay(commands.Cog):
         vc = discord.utils.get(self.bot.voice_clients, guild=guild)
 
         try:
-            # Usuário entrou ou trocou de canal de voz
             if after.channel and (not before.channel or before.channel.id != after.channel.id):
                 if vc and vc.is_connected():
                     await vc.move_to(after.channel)
                 else:
                     await after.channel.connect()
 
-            # Usuário saiu de um canal de voz
             elif not after.channel and before.channel:
                 if vc and vc.is_connected():
                     await vc.disconnect()
@@ -35,25 +33,42 @@ class TTSRelay(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        # Ignora mensagens de bots ou de fora do canal de texto alvo
         if message.author.bot or message.channel.id != config.TTS_TEXT_CHANNEL_ID:
             return
 
         guild = message.guild
         vc = discord.utils.get(self.bot.voice_clients, guild=guild)
+        target_user = guild.get_member(config.TTS_TARGET_USER_ID)
 
-        # Verifica se o bot está conectado a um canal de voz no servidor e não está tocando nada
-        if not (vc and vc.is_connected() and not vc.is_playing()):
+        # --- NOVA LÓGICA ---
+        # 1. Verifica se o usuário alvo está em um canal de voz
+        if not target_user or not target_user.voice:
+            return # Se o usuário principal não está em call, não faz nada.
+
+        target_vc = target_user.voice.channel
+
+        # 2. Se o bot não estiver conectado, ele se conecta ao canal do usuário alvo
+        if not vc or not vc.is_connected():
+            try:
+                vc = await target_vc.connect()
+            except Exception as e:
+                print(f"Erro ao tentar conectar via on_message (TTS): {e}")
+                return
+        
+        # 3. Se o bot estiver em um canal diferente, ele se move
+        elif vc.channel.id != target_vc.id:
+            await vc.move_to(target_vc)
+
+        # Se já estiver tocando, espera
+        if vc.is_playing():
             return
 
         try:
-            # Gera o áudio da mensagem em memória
             fp = io.BytesIO()
             tts = gTTS(text=message.clean_content, lang='pt-br')
             tts.write_to_fp(fp)
             fp.seek(0)
             
-            # Toca o áudio no canal de voz
             vc.play(discord.FFmpegPCMAudio(fp, pipe=True))
 
         except Exception as e:
