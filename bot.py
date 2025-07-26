@@ -16,6 +16,7 @@ intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
 intents.invites = True
+intents.voice_states = True # <-- Adicionado para ler status de voz
 
 class IsrabuyBot(commands.Bot):
     def __init__(self):
@@ -44,7 +45,8 @@ class IsrabuyBot(commands.Bot):
             'cogs.status_manager',
             'cogs.loyalty',
             'cogs.giveaway',
-            'cogs.voice_manager' # <-- ADICIONA A NOVA COG
+            'cogs.voice_manager',
+            'cogs.tts_relay' # <-- ADICIONA A NOVA COG
         ]
         
         for extension in initial_extensions:
