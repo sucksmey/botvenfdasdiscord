@@ -6,10 +6,9 @@ from discord.ext import commands
 from dotenv import load_dotenv
 import asyncpg
 import config
-from cogs.views import SalesPanelView, VIPPanelView, ClientPanelView, TutorialGamepassView
 
 load_dotenv()
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 intents = discord.Intents.default()
@@ -23,11 +22,6 @@ class IsrabuyBot(commands.Bot):
         self.pool = None
 
     async def setup_hook(self):
-        self.add_view(SalesPanelView(self))
-        self.add_view(VIPPanelView(self))
-        self.add_view(ClientPanelView(self))
-        self.add_view(TutorialGamepassView())
-
         try:
             self.pool = await asyncpg.create_pool(DATABASE_URL)
             print("Conexão com o banco de dados PostgreSQL estabelecida.")
@@ -37,13 +31,8 @@ class IsrabuyBot(commands.Bot):
 
         initial_extensions = [
             'cogs.database',
-            'cogs.admin',
-            'cogs.tickets',
-            'cogs.advertising',
             'cogs.ai_assistant',
-            'cogs.status_manager',
-            'cogs.giveaway' 
-            # 'cogs.loyalty' foi removida
+            'cogs.giveaway'
         ]
         
         for extension in initial_extensions:
