@@ -9,6 +9,9 @@ ROBUX_DELIVERY_USER_ID = 314200274933907456
 AI_CHANNEL_ID = 1393593539908337734
 SALES_CHANNEL_ID = 1380180725369798708 # Canal para onde a IA direciona
 
+# --- ID do Canal de Voz ---
+PERMANENT_VOICE_CHANNEL_ID = 1397577020950446120 # <-- ADICIONADO
+
 # --- Lista de Produtos para a IA ---
 PRODUCTS_CONTEXT = {
     "Robux": "Vendemos Robux para Roblox, com entrega via Game Pass.",
