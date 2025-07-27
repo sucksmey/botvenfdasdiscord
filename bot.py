@@ -6,7 +6,16 @@ from discord.ext import commands
 from dotenv import load_dotenv
 import asyncpg
 import config
-# A importação da cogs.views não é mais necessária aqui se a view não for persistente
+
+# --- CORREÇÃO APLICADA AQUI ---
+# Força o carregamento da biblioteca de áudio Opus
+try:
+    discord.opus.load_opus('libopus.so.0')
+except OSError:
+    print("Biblioteca Opus não encontrada. A funcionalidade de voz pode não funcionar.")
+# --------------------------------
+
+# As views não são mais necessárias aqui se o bot foi simplificado
 # from cogs.views import SalesPanelView, VIPPanelView, ClientPanelView, TutorialGamepassView
 
 load_dotenv()
@@ -25,7 +34,6 @@ class IsrabuyBot(commands.Bot):
         self.pool = None
 
     async def setup_hook(self):
-        # As views de setup não são mais necessárias aqui se o bot simplificado não as tiver
         # self.add_view(SalesPanelView(self))
         # self.add_view(VIPPanelView(self))
         # self.add_view(ClientPanelView(self))
@@ -40,15 +48,9 @@ class IsrabuyBot(commands.Bot):
 
         initial_extensions = [
             'cogs.database',
-            # 'cogs.admin',
-            # 'cogs.tickets',
-            # 'cogs.advertising',
             'cogs.ai_assistant',
-            # 'cogs.status_manager',
-            # 'cogs.loyalty',
             'cogs.giveaway',
-            'cogs.voice_manager' # Unifica toda a lógica de voz
-            # 'cogs.tts_relay' foi removida
+            'cogs.voice_manager'
         ]
         
         for extension in initial_extensions:
