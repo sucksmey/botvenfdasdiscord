@@ -1,2 +1,4 @@
+# nixpacks.toml
+# Não precisamos mais pedir ffmpeg ou libopus
 [phases.setup]
-nixPkgs = ["python3", "gcc", "ffmpeg"]
+nixPkgs = ["python3", "gcc"]
