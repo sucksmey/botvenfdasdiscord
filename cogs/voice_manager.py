@@ -6,7 +6,7 @@ import asyncio
 import aiohttp
 import io
 import traceback
-import urllib.parse # <-- Biblioteca correta para codificar a URL
+import urllib.parse
 
 class VoiceManager(commands.Cog):
     def __init__(self, bot):
@@ -18,29 +18,28 @@ class VoiceManager(commands.Cog):
 
     @tasks.loop(seconds=30)
     async def ensure_voice_connection(self):
+        """Verifica a cada 30 segundos e garante que o bot esteja no canal de voz permanente."""
         try:
             guild = self.bot.get_guild(config.GUILD_ID)
-            if not guild: return
+            if not guild:
+                return
 
-            target_user = guild.get_member(config.TTS_TARGET_USER_ID)
+            # O canal de destino é sempre o canal fixo definido no config
+            target_channel = guild.get_channel(config.PERMANENT_VOICE_CHANNEL_ID)
+            if not isinstance(target_channel, discord.VoiceChannel):
+                print(f"ERRO: O ID {config.PERMANENT_VOICE_CHANNEL_ID} não é de um canal de voz válido.")
+                return
+
             vc = guild.voice_client
-            target_channel = None
 
-            if target_user and target_user.voice and target_user.voice.channel:
-                target_channel = target_user.voice.channel
+            # Se o bot estiver conectado, mas no canal errado, ele se move.
+            if vc and vc.is_connected():
+                if vc.channel.id != target_channel.id:
+                    await vc.move_to(target_channel)
+            # Se o bot não estiver conectado em lugar nenhum, ele conecta.
             else:
-                for channel in guild.voice_channels:
-                    if channel.members and any(not m.bot for m in channel.members):
-                        target_channel = channel
-                        break
-            
-            if target_channel:
-                if vc:
-                    if vc.channel.id != target_channel.id: await vc.move_to(target_channel)
-                else:
-                    await target_channel.connect()
-            elif vc:
-                await vc.disconnect()
+                await target_channel.connect()
+
         except Exception as e:
             print(f"Erro na tarefa de conexão de voz: {e}")
 
@@ -50,6 +49,7 @@ class VoiceManager(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
+        # A lógica de TTS continua funcionando normalmente
         if message.author.bot or message.channel.id != config.TTS_TEXT_CHANNEL_ID:
             return
 
@@ -57,14 +57,13 @@ class VoiceManager(commands.Cog):
         if not (vc and vc.is_connected()):
             return
         
+        # O resto da lógica de TTS...
+        if vc.is_playing():
+            return
+
         await message.add_reaction("💬")
 
-        while vc.is_playing():
-            await asyncio.sleep(0.5)
-
         try:
-            # --- CORREÇÃO APLICADA AQUI ---
-            # Usa urllib.parse.quote em vez de discord.utils.quote
             encoded_text = urllib.parse.quote(message.clean_content)
             url = f"https://api.streamelements.com/kappa/v2/speech?voice=Vitoria&text={encoded_text}"
             
