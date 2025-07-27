@@ -7,16 +7,7 @@ from dotenv import load_dotenv
 import asyncpg
 import config
 
-# --- CORREÇÃO APLICADA AQUI ---
-# Força o carregamento da biblioteca de áudio Opus
-try:
-    discord.opus.load_opus('libopus.so.0')
-except OSError:
-    print("Biblioteca Opus não encontrada. A funcionalidade de voz pode não funcionar.")
-# --------------------------------
-
-# As views não são mais necessárias aqui se o bot foi simplificado
-# from cogs.views import SalesPanelView, VIPPanelView, ClientPanelView, TutorialGamepassView
+# A linha que tentava carregar o Opus foi removida
 
 load_dotenv()
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
@@ -34,11 +25,6 @@ class IsrabuyBot(commands.Bot):
         self.pool = None
 
     async def setup_hook(self):
-        # self.add_view(SalesPanelView(self))
-        # self.add_view(VIPPanelView(self))
-        # self.add_view(ClientPanelView(self))
-        # self.add_view(TutorialGamepassView())
-
         try:
             self.pool = await asyncpg.create_pool(DATABASE_URL)
             print("Conexão com o banco de dados PostgreSQL estabelecida.")
