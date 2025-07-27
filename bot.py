@@ -7,10 +7,6 @@ from dotenv import load_dotenv
 import asyncpg
 import config
 
-# --- CORREÇÃO APLICADA AQUI ---
-# Aponta para a biblioteca Opus que instalamos
-discord.opus.load_opus('libopus.so.0')
-
 load_dotenv()
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
