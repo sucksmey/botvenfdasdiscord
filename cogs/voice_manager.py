@@ -3,7 +3,10 @@ import discord
 from discord.ext import commands, tasks
 import config
 import asyncio
-import aiohttp # Para fazer requisições web
+import aiohttp
+import io
+import traceback
+import urllib.parse # <-- Biblioteca correta para codificar a URL
 
 class VoiceManager(commands.Cog):
     def __init__(self, bot):
@@ -60,16 +63,16 @@ class VoiceManager(commands.Cog):
             await asyncio.sleep(0.5)
 
         try:
-            # --- NOVA LÓGICA DE TTS VIA API EXTERNA ---
-            # Usando a API do StreamElements, que é pública e estável
-            url = f"https://api.streamelements.com/kappa/v2/speech?voice=Vitoria&text={discord.utils.quote(message.clean_content)}"
+            # --- CORREÇÃO APLICADA AQUI ---
+            # Usa urllib.parse.quote em vez de discord.utils.quote
+            encoded_text = urllib.parse.quote(message.clean_content)
+            url = f"https://api.streamelements.com/kappa/v2/speech?voice=Vitoria&text={encoded_text}"
             
             async with aiohttp.ClientSession() as session:
                 async with session.get(url) as resp:
                     if resp.status != 200:
                         raise Exception(f"API de TTS retornou status {resp.status}")
                     
-                    # Toca o áudio diretamente da resposta da API
                     audio_data = await resp.read()
                     vc.play(discord.PCMAudio(io.BytesIO(audio_data)))
 
@@ -82,7 +85,8 @@ class VoiceManager(commands.Cog):
             await message.delete()
 
         except Exception as e:
-            print(f"Erro ao tentar reproduzir TTS (API Externa): {e}")
+            print(f"Erro ao tentar reproduzir TTS (API Externa):")
+            traceback.print_exc()
             await message.reply(f"❌ Ocorreu um erro ao tentar reproduzir a fala: `{str(e)}`")
             try:
                 await message.remove_reaction("💬", self.bot.user)
