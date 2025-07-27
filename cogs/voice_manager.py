@@ -2,11 +2,8 @@
 import discord
 from discord.ext import commands, tasks
 import config
-from gtts import gTTS
-import io
-import os
 import asyncio
-import traceback
+import aiohttp # Para fazer requisições web
 
 class VoiceManager(commands.Cog):
     def __init__(self, bot):
@@ -26,28 +23,21 @@ class VoiceManager(commands.Cog):
             vc = guild.voice_client
             target_channel = None
 
-            # Prioridade 1: Seguir o usuário alvo
             if target_user and target_user.voice and target_user.voice.channel:
                 target_channel = target_user.voice.channel
             else:
-                # Prioridade 2: Procurar um canal com membros
                 for channel in guild.voice_channels:
-                    # Procura um canal que não esteja vazio (e que os membros não sejam só bots)
                     if channel.members and any(not m.bot for m in channel.members):
                         target_channel = channel
-                        break # Encontrou o primeiro canal com gente, para de procurar
+                        break
             
-            # Se encontrou um canal de destino (seja do usuário alvo ou um canal com gente)
             if target_channel:
                 if vc:
-                    if vc.channel.id != target_channel.id:
-                        await vc.move_to(target_channel)
+                    if vc.channel.id != target_channel.id: await vc.move_to(target_channel)
                 else:
                     await target_channel.connect()
-            # Se não encontrou NENHUM canal de destino (servidor de voz vazio) e o bot está conectado
             elif vc:
                 await vc.disconnect()
-
         except Exception as e:
             print(f"Erro na tarefa de conexão de voz: {e}")
 
@@ -60,10 +50,8 @@ class VoiceManager(commands.Cog):
         if message.author.bot or message.channel.id != config.TTS_TEXT_CHANNEL_ID:
             return
 
-        guild = message.guild
-        vc = guild.voice_client
-
-        if not (vc and vc.is_connected() and not vc.is_playing()):
+        vc = discord.utils.get(self.bot.voice_clients, guild=message.guild)
+        if not (vc and vc.is_connected()):
             return
         
         await message.add_reaction("💬")
@@ -71,30 +59,36 @@ class VoiceManager(commands.Cog):
         while vc.is_playing():
             await asyncio.sleep(0.5)
 
-        tts_file = f"temp_tts_{message.id}.mp3"
         try:
-            tts = gTTS(text=message.clean_content, lang='pt-br')
-            tts.save(tts_file)
-            source = discord.FFmpegPCMAudio(tts_file)
-            vc.play(source)
+            # --- NOVA LÓGICA DE TTS VIA API EXTERNA ---
+            # Usando a API do StreamElements, que é pública e estável
+            url = f"https://api.streamelements.com/kappa/v2/speech?voice=Vitoria&text={discord.utils.quote(message.clean_content)}"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as resp:
+                    if resp.status != 200:
+                        raise Exception(f"API de TTS retornou status {resp.status}")
+                    
+                    # Toca o áudio diretamente da resposta da API
+                    audio_data = await resp.read()
+                    vc.play(discord.PCMAudio(io.BytesIO(audio_data)))
+
             while vc.is_playing():
                 await asyncio.sleep(0.5)
-            os.remove(tts_file)
+
             await message.remove_reaction("💬", self.bot.user)
             await message.add_reaction("✅")
             await asyncio.sleep(2)
             await message.delete()
+
         except Exception as e:
-            print(f"Erro ao tentar reproduzir TTS:")
-            traceback.print_exc()
+            print(f"Erro ao tentar reproduzir TTS (API Externa): {e}")
             await message.reply(f"❌ Ocorreu um erro ao tentar reproduzir a fala: `{str(e)}`")
             try:
                 await message.remove_reaction("💬", self.bot.user)
             except discord.NotFound:
                 pass
             await message.add_reaction("❌")
-            if os.path.exists(tts_file):
-                os.remove(tts_file)
 
 async def setup(bot):
     await bot.add_cog(VoiceManager(bot))
