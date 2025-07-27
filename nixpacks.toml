@@ -1,4 +1,2 @@
-# nixpacks.toml
-
 [phases.setup]
 nixPkgs = ["python3", "gcc", "ffmpeg", "libopus"]
