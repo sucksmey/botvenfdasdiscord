@@ -3,7 +3,10 @@ import discord
 from discord.ext import commands, tasks
 import config
 from gtts import gTTS
-import os # Importa a biblioteca 'os' para lidar com arquivos
+import io
+import os
+import asyncio
+import traceback
 
 class VoiceManager(commands.Cog):
     def __init__(self, bot):
@@ -18,16 +21,21 @@ class VoiceManager(commands.Cog):
         try:
             guild = self.bot.get_guild(config.GUILD_ID)
             if not guild: return
+
             target_user = guild.get_member(config.TTS_TARGET_USER_ID)
             permanent_channel = guild.get_channel(config.PERMANENT_VOICE_CHANNEL_ID)
+            
             target_channel = None
+
             if target_user and target_user.voice and target_user.voice.channel:
                 target_channel = target_user.voice.channel
             elif permanent_channel:
                 target_channel = permanent_channel
+            
             if not target_channel:
                 if guild.voice_client: await guild.voice_client.disconnect()
                 return
+
             vc = guild.voice_client
             if vc:
                 if vc.channel.id != target_channel.id:
@@ -49,26 +57,25 @@ class VoiceManager(commands.Cog):
         guild = message.guild
         vc = guild.voice_client
 
-        if not (vc and vc.is_connected() and not vc.is_playing()):
+        if not (vc and vc.is_connected()):
             return
         
         await message.add_reaction("💬")
 
+        while vc.is_playing():
+            await asyncio.sleep(0.5)
+
+        tts_file = f"temp_tts_{message.id}.mp3"
         try:
-            # --- LÓGICA CORRIGIDA ---
-            # 1. Gera o áudio e salva em um arquivo temporário
             tts = gTTS(text=message.clean_content, lang='pt-br')
-            tts_file = f"temp_tts_{message.id}.mp3"
             tts.save(tts_file)
 
-            # 2. Toca o áudio a partir do arquivo
             source = discord.FFmpegPCMAudio(tts_file)
             vc.play(source)
 
             while vc.is_playing():
                 await asyncio.sleep(0.5)
 
-            # 3. Remove o arquivo temporário após tocar
             os.remove(tts_file)
 
             await message.remove_reaction("💬", self.bot.user)
@@ -77,11 +84,23 @@ class VoiceManager(commands.Cog):
             await message.delete()
 
         except Exception as e:
-            print(f"Erro ao tentar reproduzir TTS: {e}")
-            await message.remove_reaction("💬", self.bot.user)
+            # --- LÓGICA DE ERRO ATUALIZADA ---
+            print("Erro ao tentar reproduzir TTS:")
+            traceback.print_exc()
+
+            # Responde no mesmo canal com o erro
+            error_text = str(e)
+            await message.reply(f"❌ Ocorreu um erro ao tentar reproduzir a fala: `{error_text}`")
+
+            # Remove a reação de "processando" e adiciona a de erro
+            try:
+                await message.remove_reaction("💬", self.bot.user)
+            except discord.NotFound:
+                pass # A reação pode já ter sido removida
             await message.add_reaction("❌")
-            # Garante que o arquivo temporário seja removido mesmo em caso de erro
-            if 'tts_file' in locals() and os.path.exists(tts_file):
+            
+            # Garante que o arquivo temporário seja removido
+            if os.path.exists(tts_file):
                 os.remove(tts_file)
 
 async def setup(bot):
